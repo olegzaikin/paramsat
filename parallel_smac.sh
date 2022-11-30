@@ -16,18 +16,17 @@
 #  smac --scenario ./scenario --mode ROAR --shared_model True --input_psmac_dirs ./smac3-output* --seed 2
 #==============================================================================
 
-version="0.0.1"
+version="0.0.2"
 
 scriptname="parallel_smac.sh"
 
-[ $# -eq 3 ] || \
-{
+if [ $# -ne 3 ]; then
   echo "Usage: $scriptname scenario mode cpunum shareddir"
   echo "  scenario  : path to a file with SMAC scenario"
   echo "  mode      : SMAC mode (ROAR or SMAC4AC)"
   echo "  cpunum    : CPU cores"
   exit 1
-}
+fi
 
 echo "Running $scriptname of version $version"
 
