@@ -12,11 +12,11 @@
 # Example:
 #  parallel_smac.sh ./scenario ROAR 2 
 # runs 2 species of SMAC with the shared directory ./out/
-#  smac --scenario ./scenario --mode ROAR --shared_model True --input_psmac_dirs ./smac3-output* --seed 1
-#  smac --scenario ./scenario --mode ROAR --shared_model True --input_psmac_dirs ./smac3-output* --seed 2
+#  smac --scenario ./scenario --abort-on-first-run-crash false --mode ROAR --shared_model True --input_psmac_dirs ./smac3-output* --seed 1
+#  smac --scenario ./scenario --abort-on-first-run-crash false --mode ROAR --shared_model True --input_psmac_dirs ./smac3-output* --seed 2
 #==============================================================================
 
-version="0.0.2"
+version="0.0.3"
 
 scriptname="parallel_smac.sh"
 
@@ -41,5 +41,5 @@ echo "cpu_num   : $cpunum"
 set -x
 for (( i=1; i<=$cpunum; i++ ))
 do
-    smac --scenario $scenario --mode $mode --shared_model True --input_psmac_dirs ./smac3-output* --seed $i &> out_$i &
+    smac --scenario $scenario --abort-on-first-run-crash false --mode $mode --shared_model True --input_psmac_dirs ./smac3-output* --seed $i &> out_$i &
 done
