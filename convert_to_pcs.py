@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.0.2'
+version = '0.0.3'
 
 import sys
 
@@ -40,33 +40,35 @@ def read_solver_parameters(param_file_name : str):
   assert(len(params) > 0)
   return params
 
-if len(sys.argv) == 1:
-  sys.exit('Usage : ' + script_name + ' solver-parameters')
+if __name__ == '__main__':
 
-param_file_name = sys.argv[1]
-params = read_solver_parameters(param_file_name)
-print(str(len(params)) + ' params')
+  if len(sys.argv) == 1:
+    sys.exit('Usage : ' + script_name + ' solver-parameters')
 
-# Convert each parameter to the PCS format:
-pcs_str = ''
-for p in params:
-  # If Boolean:
-  if p.left_bound == '0' and p.right_bound == '1':
-    default_bool = 'true' if p.default == '1' else 'false'
-    pcs_str += p.name + ' {false, true}[' + default_bool + ']'
-  # If integer with too many values, force logariphmic steps:
-  elif int(p.right_bound) - int(p.left_bound) > 100:
-      lb = '1' if int(p.left_bound) == 0 else p.left_bound
-      pcs_str += p.name + ' [' + lb + ', ' + p.right_bound + ']' +\
-      '[' + p.default + ']il'
-  # Just integer:
-  else:
-    pcs_str += p.name + ' [' + p.left_bound + ', ' + p.right_bound + ']' +\
-    '[' + p.default + ']i'
-  pcs_str += '\n'
+  param_file_name = sys.argv[1]
+  params = read_solver_parameters(param_file_name)
+  print(str(len(params)) + ' params')
 
-# Report results:
-pcs_file_name = param_file_name + '.pcs'
-print('Writing to file ' + pcs_file_name)
-with open(pcs_file_name, 'w') as ofile:
-  ofile.write(pcs_str)
+  # Convert each parameter to the PCS format:
+  pcs_str = ''
+  for p in params:
+    # If Boolean:
+    if p.left_bound == '0' and p.right_bound == '1':
+      default_bool = 'true' if p.default == '1' else 'false'
+      pcs_str += p.name + ' {false, true}[' + default_bool + ']'
+    # If integer with too many values, force logariphmic steps:
+    elif int(p.right_bound) - int(p.left_bound) > 100:
+        lb = '1' if int(p.left_bound) == 0 else p.left_bound
+        pcs_str += p.name + ' [' + lb + ', ' + p.right_bound + ']' +\
+        '[' + p.default + ']il'
+    # Just integer:
+    else:
+      pcs_str += p.name + ' [' + p.left_bound + ', ' + p.right_bound + ']' +\
+      '[' + p.default + ']i'
+    pcs_str += '\n'
+
+  # Report results:
+  pcs_file_name = param_file_name + '.pcs'
+  print('Writing to file ' + pcs_file_name)
+  with open(pcs_file_name, 'w') as ofile:
+    ofile.write(pcs_str)
