@@ -14,7 +14,7 @@ import sys
 import glob, os
 
 script_name = "parse_smac_results.py"
-version = '0.0.1'
+version = '0.0.2'
 
 class Result:
   obj_val = 0
