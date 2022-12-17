@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.0.1'
+version = '0.0.2'
 
 import sys
 
@@ -21,28 +21,30 @@ class Param:
   right_bound = -1
   default = -1
 
+# Read SAT solver's parameters:
+def read_solver_parameters(param_file_name : str):
+  params = []
+  with open(param_file_name, 'r') as param_file:
+    lines = param_file.read().splitlines()
+    for line in lines:
+      if 'seed' in line or 'statistics' in line or 'verbose' in line:
+        continue
+      words = line.split(' ')
+      assert(len(words) == 4)
+      p = Param()
+      p.name = words[0]
+      p.left_bound = words[1]
+      p.default = words[2]
+      p.right_bound = words[3]
+      params.append(p)
+  assert(len(params) > 0)
+  return params
+
 if len(sys.argv) == 1:
   sys.exit('Usage : ' + script_name + ' solver-parameters')
 
 param_file_name = sys.argv[1]
-
-params = []
-
-# Read SAT solver's parameters:
-with open(param_file_name, 'r') as param_file:
-  lines = param_file.read().splitlines()
-  for line in lines:
-    if 'seed' in line or 'statistics' in line or 'verbose' in line:
-      continue
-    words = line.split(' ')
-    assert(len(words) == 4)
-    p = Param()
-    p.name = words[0]
-    p.left_bound = words[1]
-    p.default = words[2]
-    p.right_bound = words[3]
-    params.append(p)
-
+params = read_solver_parameters(param_file_name)
 print(str(len(params)) + ' params')
 
 # Convert each parameter to the PCS format:
