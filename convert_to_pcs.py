@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.0.3'
+version = '0.0.4'
 
 import sys
 
@@ -57,7 +57,7 @@ if __name__ == '__main__':
       default_bool = 'true' if p.default == '1' else 'false'
       pcs_str += p.name + ' {false, true}[' + default_bool + ']'
     # If integer with too many values, force logariphmic steps:
-    elif int(p.right_bound) - int(p.left_bound) > 100:
+    elif int(p.right_bound) - int(p.left_bound) > 100 and p.default != '0':
         lb = '1' if int(p.left_bound) == 0 else p.left_bound
         pcs_str += p.name + ' [' + lb + ', ' + p.right_bound + ']' +\
         '[' + p.default + ']il'
