@@ -13,7 +13,7 @@
 #   kissat 1.cnf --time=10 -q -n --stable=false
 #==============================================================================
 
-version="0.0.1"
+version="0.0.2"
 scriptname="runsolver_smac.sh"
 
 if [ $# -lt 6 ]; then
@@ -46,7 +46,11 @@ done
 start=`date +%s.%N`
 set -x
 # Call SAT solver with the time limit:
-$solver $cnf_name --time=$cutoff_time -q -n $params
+if [[ "$solver" == "kissat"* ]]; then
+  $solver $cnf_name --time=$cutoff_time -q -n $params
+elif [[ "$solver" == "cadical"* ]]; then
+  $solver $cnf_name -t $cutoff_time -q -n $params
+fi
 end=`date +%s.%N`
 # Runtime in seconds:
 runtime=$( echo "$end - $start" | bc -l )

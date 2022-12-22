@@ -29,13 +29,38 @@ def read_solver_parameters(param_file_name : str):
     for line in lines:
       if 'seed' in line or 'statistics' in line or 'verbose' in line:
         continue
-      words = line.split(' ')
-      assert(len(words) == 4)
-      p = Param()
-      p.name = words[0]
-      p.left_bound = words[1]
-      p.default = words[2]
-      p.right_bound = words[3]
+      words = line.strip().split(' ')
+      # kissat --range format:
+      if len(words) == 4 and '=' not in line:
+          p = Param()
+          p.name = words[0]
+          p.left_bound = words[1]
+          p.default = words[2]
+          p.right_bound = words[3] 
+      # cadical --help format:
+      elif len(words) > 1 and '=' in words[0]:
+          assert('--' in words[0])
+          s = words[0].replace('--', '')
+          print(s)
+          p = Param()
+          p.name = s.split('=')[0]
+          if s.split('=')[1] == 'bool':
+              p.left_bound = '0'
+              p.right_bound = '1'
+          else:
+              p.left_bound = s.split('=')[1].split('..')[0]
+              if 'e' in p.left_bound:
+                  p.left_bound = str(int(float(p.left_bound)))
+              p.right_bound = s.split('..')[1]
+              if 'e' in p.right_bound:
+                  p.right_bound = str(int(float(p.right_bound)))
+          p.default = words[-1].replace('[', '').replace(']', '')
+          if p.default == 'true':
+              p.default = 1
+          elif p.default == 'false':
+              p.default = 0
+          elif 'e' in p.default:
+              p.default = str(int(float(p.default)))
       params.append(p)
   assert(len(params) > 0)
   return params
@@ -57,7 +82,7 @@ if __name__ == '__main__':
       default_bool = 'true' if p.default == '1' else 'false'
       pcs_str += p.name + ' {false, true}[' + default_bool + ']'
     # If integer with too many values, force logariphmic steps:
-    elif int(p.right_bound) - int(p.left_bound) > 100 and p.default != '0':
+    elif float(p.left_bound) > 0 and int(p.right_bound) - int(p.left_bound) > 100 and float(p.default) > 0:
         lb = '1' if int(p.left_bound) == 0 else p.left_bound
         pcs_str += p.name + ' [' + lb + ', ' + p.right_bound + ']' +\
         '[' + p.default + ']il'
