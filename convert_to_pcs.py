@@ -27,7 +27,7 @@ def read_solver_parameters(param_file_name : str):
   with open(param_file_name, 'r') as param_file:
     lines = param_file.read().splitlines()
     for line in lines:
-      if 'seed' in line or 'statistics' in line or 'verbose' in line:
+      if 'seed' in line or 'statistics' in line or 'verbose' or 'quiet' in line:
         continue
       words = line.strip().split(' ')
       # kissat --range format:
