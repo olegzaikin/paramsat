@@ -12,7 +12,7 @@
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.0.2'
+version = '0.0.3'
 
 import sys
 import os
@@ -89,10 +89,13 @@ def parse_cdcl_time(o):
 	refuted_leaves = -1
 	lines = o.split('\n')
 	for line in lines:
-		if '100.00 %  total' in line:
+		if 'c process-time' in line:
 			words = line.split()
-			assert(len(words) == 5)
-			t = float(words[1])
+			assert(len(words) == 4 or len(words) == 5)
+			if len(words) == 4:
+			  t = float(words[2])
+			else:
+                          t = float(words[3])
 	return t
 
 # Run solver on a given point:
