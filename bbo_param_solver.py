@@ -12,12 +12,14 @@
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.0.1'
+version = '0.0.2'
 
 import sys
 import os
 import random
 import copy
+import math
+
 
 # Solver's parameters:
 class Param:
@@ -94,10 +96,13 @@ def parse_cdcl_time(o):
 	return t
 
 # Run solver on a given point:
-def run_solver(solver_name : str, cnf_file_name : str, params : list, point : Point):
+def run_solver(solver_name : str, time_lim : float, cnf_file_name : str, params : list, point : Point):
   assert(len(params) > 1)
   assert(len(params) == len(point.values))
-  s = solver_name + ' '
+  if time_lim > 0:
+    s = solver_name + ' --time=' + str(math.ceil(time_lim)) + ' '
+  else:
+    s = solver_name + ' '
   for i in range(len(params)):
     s += '--' + params[i].name + '=' + str(point.values[i]) + ' '
   s += cnf_file_name
@@ -106,16 +111,24 @@ def run_solver(solver_name : str, cnf_file_name : str, params : list, point : Po
 
 # Return (i+1)-th value if i is not the last element, 0-th element otherwise:
 def next_value(value, param_values : list):
+  global random
   assert(value in param_values)
   indx = -1
+  # Choose direction randomly:
+  pos = random.choice([True, False])
   for i in range(len(param_values)):
     if param_values[i] == value:
       indx = i
-      break
+      break  
   assert(indx >= 0 and indx < len(param_values))
-  if indx == len(param_values) - 1:
-    return param_values[0]
-  return param_values[indx+1]
+  # Choose either left or right value from the current one:
+  if pos == True:
+    new_indx = indx + 1
+  else:
+    new_indx = indx - 1
+  if new_indx == len(param_values):
+    new_indx = 0
+  return param_values[new_indx]
 
 # Find a new record point via (1+1)-EA:
 def oneplusone(point : Point, params : list):
@@ -126,15 +139,15 @@ def oneplusone(point : Point, params : list):
   # Change each value with probability:
   new_points = []
   while len(new_points) == 0:
+    new_p = copy.deepcopy(point)
     for i in range(len(params)):
       prob = random.random()
       if (prob <= 1/len(params)):
-        new_p = copy.deepcopy(point)
         new_p.values[i] = next_value(new_p.values[i], params[i].values)
         assert(new_p != point)
-        if new_p not in checked_points:
-          checked_points.add(new_p)
-          new_points.append(new_p)
+    if new_p not in checked_points:
+      checked_points.add(new_p)
+      new_points.append(new_p)
   return new_points
 
 if __name__ == '__main__':
@@ -167,7 +180,7 @@ if __name__ == '__main__':
   print('Default point :')
   print(str(def_point) + '\n')
 
-  best_t, command = run_solver(solver_name, cnf_file_name, params, def_point)
+  best_t, command = run_solver(solver_name, -1, cnf_file_name, params, def_point)
   print('Current best solving time : ' + str(best_t))
   print(command + '\n')
 
@@ -176,16 +189,22 @@ if __name__ == '__main__':
   checked_points = set()
 
   best_point = copy.deepcopy(def_point)
+  best_command = command
   while len(checked_points) < 100:
     new_points = oneplusone(best_point, params)
     assert(len(new_points) > 0)
     #print(str(len(new_points)) + ' new points')
-    print('Formed ' + str(len(checked_points)) + ' points')
+    
     for new_p in new_points:
-      t, command = run_solver(solver_name, cnf_file_name, params, new_p)
+      t, command = run_solver(solver_name, best_t, cnf_file_name, params, new_p)
       print('Time : ' + str(t))
       if t < best_t:
         best_t = t
         best_point = copy.deepcopy(new_p)
+        best_command = command
         print('Updated best time : ' + str(best_t))
-        print(command + '\n')
+        print(best_command + '\n')
+    print('Processed ' + str(len(checked_points)) + ' points')
+
+  print('Final best time : ' + str(best_t))
+  print('Final best command : ' + best_command)
