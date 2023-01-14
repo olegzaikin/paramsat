@@ -18,5 +18,5 @@ echo "cpu_num   : $cpunum"
 set -x
 for (( i=1; i<=$cpunum; i++ ))
 do
-    python3 ./bbo_param_solver.py kissat_3.0.0 ./kissat3.pcs ./cbmc_md5-27_1hash.cnf $i &> out_27_$i &
+    python3 ./bbo_param_solver.py kissat_3.0.0 ./kissat3.pcs ./cbmc_md5-28_1hash.cnf $i &> out_28_$i &
 done

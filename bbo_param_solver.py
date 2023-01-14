@@ -12,7 +12,7 @@
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.0.3'
+version = '0.0.4'
 
 import sys
 import os
@@ -91,11 +91,12 @@ def parse_cdcl_time(o):
 	for line in lines:
 		if 'c process-time' in line:
 			words = line.split()
-			assert(len(words) == 4 or len(words) == 5)
-			if len(words) == 4:
-			  t = float(words[2])
-			else:
-                          t = float(words[3])
+			assert(len(words) >= 4)
+			if len(words) != 4 and len(words) != 5:
+                          print(o)
+			assert(words[-1] == 'seconds')
+			t = float(words[-2])
+	assert(t > 0)
 	return t
 
 # Run solver on a given point:
