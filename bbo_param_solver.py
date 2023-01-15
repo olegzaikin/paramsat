@@ -12,7 +12,7 @@
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.0.6'
+version = '0.0.7'
 
 import sys
 import os
@@ -196,6 +196,7 @@ if __name__ == '__main__':
   random.seed(seed)
 
   checked_points = set()
+  checked_points.add(def_point)
 
   best_point = copy.deepcopy(def_point)
   best_command = command
