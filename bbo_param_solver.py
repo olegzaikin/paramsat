@@ -12,7 +12,7 @@
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.0.5'
+version = '0.0.6'
 
 import sys
 import os
@@ -86,6 +86,7 @@ def read_pcs(param_file_name : str):
 # Parse CDCL solver's log:
 def parse_cdcl_time(o):
 	t = -1
+	sat = -1
 	refuted_leaves = -1
 	lines = o.split('\n')
 	for line in lines:
@@ -94,22 +95,27 @@ def parse_cdcl_time(o):
 			assert(len(words) >= 4)
 			assert(words[-1] == 'seconds')
 			t = float(words[-2])
+		assert('s UNSATISFIABLE' not in line)
+		if 's SATISFIABLE' in line:
+                  sat = 1
 	assert(t > 0)
-	return t
+	return t, sat
 
 # Run solver on a given point:
 def run_solver(solver_name : str, time_lim : float, cnf_file_name : str, params : list, point : Point):
   assert(len(params) > 1)
   assert(len(params) == len(point.values))
+  sys_str = ''
   if time_lim > 0:
-    s = solver_name + ' --time=' + str(math.ceil(time_lim)) + ' '
+    sys_str = solver_name + ' --time=' + str(math.ceil(time_lim)) + ' '
   else:
-    s = solver_name + ' '
+    sys_str = solver_name + ' '
   for i in range(len(params)):
-    s += '--' + params[i].name + '=' + str(point.values[i]) + ' '
-  s += cnf_file_name
-  o = os.popen(s).read()
-  return parse_cdcl_time(o), s
+    sys_str += '--' + params[i].name + '=' + str(point.values[i]) + ' '
+  sys_str += cnf_file_name
+  o = os.popen(sys_str).read()
+  t, sat = parse_cdcl_time(o)
+  return t, sat, sys_str
 
 # Return (i+1)-th value if i is not the last element, 0-th element otherwise:
 def next_value(value, param_values : list):
@@ -182,7 +188,8 @@ if __name__ == '__main__':
   print('Default point :')
   print(str(def_point) + '\n')
 
-  best_t, command = run_solver(solver_name, -1, cnf_file_name, params, def_point)
+  best_t, sat, command = run_solver(solver_name, -1, cnf_file_name, params, def_point)
+  assert(sat == 1)
   print('Current best solving time : ' + str(best_t))
   print(command + '\n')
 
@@ -198,14 +205,16 @@ if __name__ == '__main__':
     #print(str(len(new_points)) + ' new points')
     
     for new_p in new_points:
-      t, command = run_solver(solver_name, best_t, cnf_file_name, params, new_p)
+      t, sat, command = run_solver(solver_name, best_t, cnf_file_name, params, new_p)
       print('Time : ' + str(t))
-      if t < best_t:
+      if sat == 1 and t < best_t:
         best_t = t
         best_point = copy.deepcopy(new_p)
         best_command = command
         print('Updated best time : ' + str(best_t))
         print(best_command + '\n')
+      elif sat == -1 and t < best_t:
+       print('Time is better but SAT is not found.')
     print('Processed ' + str(len(checked_points)) + ' points')
 
   print('Final best time : ' + str(best_t))
