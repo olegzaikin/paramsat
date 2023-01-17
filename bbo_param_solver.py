@@ -12,14 +12,14 @@
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.0.7'
+version = '0.0.8'
 
 import sys
 import os
 import random
 import copy
 import math
-
+import statistics
 
 # Solver's parameters:
 class Param:
@@ -43,6 +43,12 @@ class Point:
       s += str(x) + ','
     s += str(self.values[-1])
     return s
+  def __getitem__(self, key):
+    assert(key < len(self.values))
+    return self.values[key]
+  def __setitem__(self, key, name):
+    assert(key < len(self.values))
+    self.values[key] = name
 
 # Convert string to int if not Boolean:
 def convert_if_int(x : str):
@@ -117,26 +123,26 @@ def run_solver(solver_name : str, time_lim : float, cnf_file_name : str, params 
   t, sat = parse_cdcl_time(o)
   return t, sat, sys_str
 
-# Return (i+1)-th value if i is not the last element, 0-th element otherwise:
-def next_value(value, param_values : list):
-  global random
-  assert(value in param_values)
-  indx = -1
-  # Choose direction randomly:
-  pos = random.choice([True, False])
-  for i in range(len(param_values)):
-    if param_values[i] == value:
-      indx = i
-      break  
-  assert(indx >= 0 and indx < len(param_values))
-  # Choose either left or right value from the current one:
-  if pos == True:
-    new_indx = indx + 1
-  else:
-    new_indx = indx - 1
-  if new_indx == len(param_values):
-    new_indx = 0
-  return param_values[new_indx]
+# Randomly choose an element from a given list except given current value.
+# The closer index is to the given one, the higher probability is to be chosen.
+def next_value(lst : list, cur_val : int):
+  indx = lst.index(cur_val)
+  assert(indx >= 0 and indx < len(lst))
+  weights = [0 for x in lst]
+  max_dist_to_left = indx
+  max_dist_to_right = len(lst) - indx - 1
+  max_dist = max(max_dist_to_left, max_dist_to_right)
+  for i in range(indx):
+    weights[indx - i - 1] = pow(2, max_dist-1 - i)
+  for i in range(indx+1, len(lst)):
+    weights[i] = pow(2, max_dist-1 - (i - indx - 1))
+  #print('indx : ' + str(indx))
+  #print(weights)
+  r = random.choices(lst, weights, k=1)
+  assert(len(r) == 1)
+  assert(r[0] in lst)
+  assert(r[0] != cur_val)
+  return r[0]
 
 # Find a new record point via (1+1)-EA:
 def oneplusone(point : Point, params : list):
@@ -151,7 +157,8 @@ def oneplusone(point : Point, params : list):
     for i in range(len(params)):
       prob = random.random()
       if (prob <= 1/len(params)):
-        new_p.values[i] = next_value(new_p.values[i], params[i].values)
+        oldval = new_p.values[i]
+        new_p[i] = next_value(params[i].values, new_p[i])
         assert(new_p != point)
     if new_p not in checked_points:
       checked_points.add(new_p)
