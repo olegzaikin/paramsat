@@ -12,7 +12,7 @@
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.0.8'
+version = '0.0.9'
 
 import sys
 import os
@@ -113,7 +113,7 @@ def run_solver(solver_name : str, time_lim : float, cnf_file_name : str, params 
   assert(len(params) == len(point.values))
   sys_str = ''
   if time_lim > 0:
-    sys_str = solver_name + ' --time=' + str(math.ceil(time_lim)) + ' '
+    sys_str = solver_name + ' --time=' + str(math.ceil(time_lim) + 1) + ' '
   else:
     sys_str = solver_name + ' '
   for i in range(len(params)):
@@ -221,8 +221,8 @@ if __name__ == '__main__':
         best_command = command
         print('Updated best time : ' + str(best_t))
         print(best_command + '\n')
-      elif sat == -1 and t < best_t:
-       print('Time is better but SAT is not found.')
+      #elif sat == -1 and t < best_t:
+      # print('Time is better but SAT is not found.')
     print('Processed ' + str(len(checked_points)) + ' points')
 
   print('Final best time : ' + str(best_t))
