@@ -12,7 +12,7 @@
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.1.0'
+version = '0.1.1'
 
 import sys
 import os
@@ -199,10 +199,10 @@ def oneplusone(point : Point, params : list):
 def points_diff(p1 : Point, p2 : Point, params : list):
   assert(len(p1.values) == len(p2.values))
   assert(len(p1.values) == len(params))
-  s = ''
+  s = 'Difference from the default point : \n'
   for i in range(len(p1.values)):
     if p1.values[i] != p2.values[i]:
-      s += params[i].name + ' : ' + str(p1.values[i]) + \
+      s += '  ' + params[i].name + ' : ' + str(p1.values[i]) + \
         ' -> ' + str(p2.values[i]) + '\n'
   return s[:-1]
 
@@ -255,8 +255,10 @@ if __name__ == '__main__':
   checked_points = set()
   checked_points.add(def_point)
 
+  runtime_def_point = best_t
   best_point = copy.deepcopy(def_point)
   best_command = command
+  updates_num = 0
   while len(checked_points) < 100:
     new_points = oneplusone(best_point, params)
     assert(len(new_points) > 0)
@@ -265,6 +267,7 @@ if __name__ == '__main__':
       t, sat, command = run_solver(solver_name, best_t, cnf_file_name, params, new_p)
       print('Time : ' + str(t))
       if sat == 1 and t < best_t:
+        updates_num += 1
         best_t = t
         best_point = copy.deepcopy(new_p)
         best_command = command
@@ -273,5 +276,8 @@ if __name__ == '__main__':
         print(best_command + '\n')
     print('Processed ' + str(len(checked_points)) + ' points')
 
-  print('Final best time : ' + str(best_t))
-  print('Final best command : ' + best_command)
+  print('\n' + str(updates_num) + " updates of best point")
+  print('Final best time : ' + str(best_t) + ' , so ' + \
+    str(runtime_def_point) + ' -> ' + str(best_t))
+  print(points_diff(def_point, best_point, params))
+  print('Final best command : \n' + best_command)
