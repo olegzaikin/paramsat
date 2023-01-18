@@ -8,18 +8,49 @@
 # parameters' values via blackbox optimization algorithms.
 #
 # Example:
-#   python3 ./bbo_param_solver.py kissat_3.0.0 ./kissat3.pcs ./problem.cnf 123
+#   python3 ./bbo_param_solver.py kissat3 ./kissat3.pcs ./problem.cnf -seed=1
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.0.9'
+version = '0.1.0'
 
 import sys
 import os
+import time
 import random
 import copy
 import math
 import statistics
+
+def print_usage():
+  print('Usage : ' + script_name + ' solver solver-parameters-file cnf-file [Options]')
+  print('  Options :\n' +\
+  '-deftime=<float>    - (default : -1)   runtime for the default point' + '\n' +\
+	'-cpunum=<int>       - (default : 1)    number of used CPU cores' + '\n' +\
+	'-seed=<int>         - (default : time) seed for pseudorandom generator' + '\n')
+
+# Input options:
+class Options:
+	cpu_num : 1
+	seed : 0
+	def_point_time : -1
+	def __init__(self):
+		self.cpu_num = 1
+		self.seed = round(time.time() * 1000)
+		self.def_point_time = -1
+	def __str__(self):
+		s = 'cpu_num        : ' + str(self.cpu_num) + '\n' +\
+		    'seed           : ' + str(self.seed) + '\n' +\
+        'def_point_time : ' + str(self.def_point_time) + '\n'
+		return s
+	def read(self, argv) :
+		for p in argv:
+			if '-cpunum=' in p:
+				self.cpu_num = int(p.split('-cpunum=')[1])
+			if '-seed=' in p:
+				self.seed = int(p.split('-seed=')[1])
+			if '-deftime' in p:
+				self.def_point_time = math.ceil(float(p.split('-deftime=')[1]))
 
 # Solver's parameters:
 class Param:
@@ -165,21 +196,28 @@ def oneplusone(point : Point, params : list):
       new_points.append(new_p)
   return new_points
 
+
 if __name__ == '__main__':
 
-  if len(sys.argv) != 5:
-    sys.exit('Usage : ' + script_name + ' solver solver-parameters-file cnf-file seed')
+  if len(sys.argv) < 4:
+    print_usage()
+    exit(1)
 
   print('Running script ' + script_name + ' of version ' + version)
 
   solver_name = sys.argv[1]
   param_file_name = sys.argv[2]
   cnf_file_name = sys.argv[3]
-  seed = int(sys.argv[4])
 
   print('solver_name : ' + solver_name)
   print('param_file_name : ' + param_file_name)
   print('cnf_file_name : ' + cnf_file_name)
+
+  op = Options()
+  op.read(sys.argv[3:])
+  print(op)
+
+  random.seed(op.seed)
 
   params = read_pcs(param_file_name)
   total_val_num = 0
@@ -195,12 +233,15 @@ if __name__ == '__main__':
   print('Default point :')
   print(str(def_point) + '\n')
 
-  best_t, sat, command = run_solver(solver_name, -1, cnf_file_name, params, def_point)
-  assert(sat == 1)
+  command = ''
+  if op.def_point_time > 0:
+    best_t = op.def_point_time
+  else:
+    best_t, sat, command = run_solver(solver_name, -1, cnf_file_name, params, def_point)
+    assert(sat == 1)
   print('Current best solving time : ' + str(best_t))
-  print(command + '\n')
-
-  random.seed(seed)
+  if command != '':
+    print(command + '\n')
 
   checked_points = set()
   checked_points.add(def_point)
