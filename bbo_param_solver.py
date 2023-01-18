@@ -52,7 +52,7 @@ class Options:
 			if '-deftime' in p:
 				self.def_point_time = math.ceil(float(p.split('-deftime=')[1]))
 
-# Solver's parameters:
+# Solver's parameter:
 class Param:
   name : str
   default : int
@@ -196,6 +196,15 @@ def oneplusone(point : Point, params : list):
       new_points.append(new_p)
   return new_points
 
+def points_diff(p1 : Point, p2 : Point, params : list):
+  assert(len(p1.values) == len(p2.values))
+  assert(len(p1.values) == len(params))
+  s = ''
+  for i in range(len(p1.values)):
+    if p1.values[i] != p2.values[i]:
+      s += params[i].name + ' : ' + str(p1.values[i]) + \
+        ' -> ' + str(p2.values[i]) + '\n'
+  return s[:-1]
 
 if __name__ == '__main__':
 
@@ -252,7 +261,6 @@ if __name__ == '__main__':
     new_points = oneplusone(best_point, params)
     assert(len(new_points) > 0)
     #print(str(len(new_points)) + ' new points')
-    
     for new_p in new_points:
       t, sat, command = run_solver(solver_name, best_t, cnf_file_name, params, new_p)
       print('Time : ' + str(t))
@@ -261,9 +269,8 @@ if __name__ == '__main__':
         best_point = copy.deepcopy(new_p)
         best_command = command
         print('Updated best time : ' + str(best_t))
+        print(points_diff(def_point, best_point, params))
         print(best_command + '\n')
-      #elif sat == -1 and t < best_t:
-      # print('Time is better but SAT is not found.')
     print('Processed ' + str(len(checked_points)) + ' points')
 
   print('Final best time : ' + str(best_t))
