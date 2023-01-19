@@ -12,7 +12,7 @@
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.2.0'
+version = '0.2.1'
 
 import sys
 import os
@@ -28,31 +28,37 @@ def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters-file cnf-file [Options]')
   print('  Options :\n' +\
   '-deftime=<float>    - (default : -1)   runtime for the default point' + '\n' +\
-	'-cpunum=<int>       - (default : 1)    number of used CPU cores' + '\n' +\
-	'-seed=<int>         - (default : time) seed for pseudorandom generator' + '\n')
+  '-maxpoints=<int>    - (default : 1000) maximum number of points to process' + '\n' +\
+  '-cpunum=<int>       - (default : 1)    number of used CPU cores' + '\n' +\
+  '-seed=<int>         - (default : time) seed for pseudorandom generator' + '\n')
 
 # Input options:
 class Options:
+	def_point_time : -1
+	max_points = 1000
 	cpu_num : 1
 	seed : 0
-	def_point_time : -1
 	def __init__(self):
+		self.def_point_time = -1
+		self.max_points = 1000
 		self.cpu_num = 1
 		self.seed = round(time.time() * 1000)
-		self.def_point_time = -1
 	def __str__(self):
-		s = 'cpu_num        : ' + str(self.cpu_num) + '\n' +\
-		    'seed           : ' + str(self.seed) + '\n' +\
-        'def_point_time : ' + str(self.def_point_time) + '\n'
+		s = 'def_point_time : ' + str(self.def_point_time) + '\n' +\
+                    'max_points     : ' + str(self.max_points) + '\n' +\
+                    'cpu_num        : ' + str(self.cpu_num) + '\n' +\
+		    'seed           : ' + str(self.seed) + '\n'
 		return s
 	def read(self, argv) :
 		for p in argv:
+			if '-deftime' in p:
+				self.def_point_time = math.ceil(float(p.split('-deftime=')[1]))
+			if '-maxpoints' in p:
+				self.max_points = math.ceil(float(p.split('-maxpoints=')[1]))
 			if '-cpunum=' in p:
 				self.cpu_num = int(p.split('-cpunum=')[1])
 			if '-seed=' in p:
 				self.seed = int(p.split('-seed=')[1])
-			if '-deftime' in p:
-				self.def_point_time = math.ceil(float(p.split('-deftime=')[1]))
 
 # Solver's parameter:
 class Param:
@@ -326,7 +332,7 @@ if __name__ == '__main__':
     kill_solver(solver_name)
     pool.close()
     pool.join()
-    if processed_points_num >= 100:
+    if processed_points_num >= op.max_points:
       print('The limit on the number of points is reached, break.')
       break
 
