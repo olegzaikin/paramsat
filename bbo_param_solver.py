@@ -12,7 +12,7 @@
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.1.1'
+version = '0.2.0'
 
 import sys
 import os
