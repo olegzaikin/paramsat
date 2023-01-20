@@ -12,7 +12,7 @@
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.2.1'
+version = '0.2.2'
 
 import sys
 import os
@@ -70,25 +70,6 @@ class Param:
     self.default = -1
     self.values = []
 
-# Set of parameters' values:
-class Point:
-  values : list
-  def __init__(self):
-    self.values = []
-  def __str__(self):
-    s = ''
-    assert(len(self.values) > 1)
-    for x in self.values[:-1]:
-      s += str(x) + ','
-    s += str(self.values[-1])
-    return s
-  def __getitem__(self, key):
-    assert(key < len(self.values))
-    return self.values[key]
-  def __setitem__(self, key, name):
-    assert(key < len(self.values))
-    self.values[key] = name
-
 # Convert string to int if not Boolean:
 def convert_if_int(x : str):
   if x in ['true', 'false']:
@@ -108,23 +89,23 @@ def read_pcs(param_file_name : str):
       assert(']' in line)
       words = line.strip().split(' ')
       assert(len(words) > 2)
-      p = Param()
-      p.name = words[0]
+      prm = Param()
+      prm.name = words[0]
       #print(p.name)
       defstr = line.split('[')[1].split(']')[0]
-      p.default = convert_if_int(defstr)
+      prm.default = convert_if_int(defstr)
       valuesstr = line.split('{')[1].split('}')[0].replace(' ', '')
       lst = valuesstr.split(',')
       #print(lst)
       for x in lst:
-          p.values.append(convert_if_int(x))
-      assert(len(p.values) > 1)
-      assert(p.default in ['true', 'false'] or isinstance(p.default, int))
+          prm.values.append(convert_if_int(x))
+      assert(len(prm.values) > 1)
+      assert(prm.default in ['true', 'false'] or isinstance(prm.default, int))
       #print(str(len(p.values)))
-      for val in p.values:
+      for val in prm.values:
         #print(val)
         assert(val in ['true', 'false'] or isinstance(val, int))
-      params.append(p)
+      params.append(prm)
   assert(len(params) > 0)
   return params
 
@@ -181,47 +162,53 @@ def next_value(lst : list, cur_val : int):
   return r[0]
 
 # Generate new points via (1+1)-EA:
-def oneplusone(point : Point, params : list, points_num : int):
+def oneplusone(point : list, params : list, points_num : int):
   global random
   global generated_points
-  assert(len(point.values) == len(params))
+  global skipped_points_num
+  assert(len(point) == len(params))
   probability = 1/len(params)
   # Change each value with probability:
   new_points = []
   while len(new_points) < points_num:
-    new_p = copy.deepcopy(point)
+    pnt = copy.deepcopy(point)
     for i in range(len(params)):
       prob = random.random()
       if (prob <= 1/len(params)):
-        oldval = new_p.values[i]
-        new_p[i] = next_value(params[i].values, new_p[i])
-        assert(new_p != point)
-    if new_p not in generated_points:
-      generated_points.add(new_p)
-      new_points.append(new_p)
+        oldval = pnt[i]
+        pnt[i] = next_value(params[i].values, pnt[i])
+        assert(pnt != point)
+    if strlistrepr(pnt) not in generated_points:
+      generated_points.add(strlistrepr(pnt))
+      new_points.append(pnt)
+    else:
+      skipped_points_num += 1
+      print(str(skipped_points_num) + ' points skipped')
   return new_points
 
-def points_diff(p1 : Point, p2 : Point, params : list):
-  assert(len(p1.values) == len(p2.values))
-  assert(len(p1.values) == len(params))
-  s = 'Difference from the default point : \n'
-  for i in range(len(p1.values)):
-    if p1.values[i] != p2.values[i]:
-      s += '  ' + params[i].name + ' : ' + str(p1.values[i]) + \
-        ' -> ' + str(p2.values[i]) + '\n'
-  return s[:-1]
+def points_diff(p1 : list, p2 : list, params : list):
+  assert(len(p1) == len(p2))
+  assert(len(p1) == len(params))
+  s0 = 'Difference from the default point : \n'
+  s = ''
+  for i in range(len(p1)):
+    if p1[i] != p2[i]:
+      s += '  ' + params[i].name + ' : ' + str(p1[i]) + \
+        ' -> ' + str(p2[i]) + '\n'
+  assert(s != '')
+  return s0 + s[:-1]
 
 # Run solver on a given point:
-def run_solver(solver_name : str, time_lim : float, cnf_file_name : str, params : list, point : Point):
+def run_solver(solver_name : str, time_lim : float, cnf_file_name : str, params : list, point : list):
   assert(len(params) > 1)
-  assert(len(params) == len(point.values))
+  assert(len(params) == len(point))
   sys_str = ''
   if time_lim > 0:
     sys_str = solver_name + ' --time=' + str(math.ceil(time_lim) + 1) + ' '
   else:
     sys_str = solver_name + ' '
   for i in range(len(params)):
-    sys_str += '--' + params[i].name + '=' + str(point.values[i]) + ' '
+    sys_str += '--' + params[i].name + '=' + str(point[i]) + ' '
   sys_str += cnf_file_name
   o = os.popen(sys_str).read()
   t, sat = parse_cdcl_time(o)
@@ -253,6 +240,13 @@ def collect_result(res):
     print(points_diff(def_point, best_point, params))
     print(best_command + '\n')
 
+def strlistrepr(lst : list):
+  assert(len(lst) > 1)
+  s = ''
+  for x in lst[:-1]:
+    s += str(x) + '-'
+  s += str(lst[-1])
+  return s
 
 if __name__ == '__main__':
   if len(sys.argv) < 4:
@@ -283,12 +277,12 @@ if __name__ == '__main__':
 
   params = read_pcs(param_file_name)
   total_val_num = 0
-  def_point = Point()
-  for p in params:
-    total_val_num += len(p.values)
-    def_point.values.append(p.default)
+  def_point = list()
+  for prm in params:
+    total_val_num += len(prm.values)
+    def_point.append(prm.default)
   params_num = len(params)
-  assert(len(def_point.values) == params_num)
+  assert(len(def_point) == params_num)
   print(str(params_num) + ' parameters')
   print(str(total_val_num) + ' values in all parameters')
 
@@ -309,11 +303,12 @@ if __name__ == '__main__':
     print(command + '\n')
 
   generated_points = set()
-  generated_points.add(def_point)
+  generated_points.add(strlistrepr(def_point))
   processed_points_num = 1 # the default point is processed
   runtime_def_point = best_t
   best_point = copy.deepcopy(def_point)
   best_command = command
+  skipped_points_num = 0
   updates_num = 0
 
   while True:
@@ -337,6 +332,8 @@ if __name__ == '__main__':
       break
 
   print('\n' + str(updates_num) + " updates of best point")
+  print(str(skipped_points_num) + ' skipped points')
+  print(str(processed_points_num) + ' processed points')
   print('Final best time : ' + str(best_t) + ' , so ' + \
     str(runtime_def_point) + ' -> ' + str(best_t))
   print(points_diff(def_point, best_point, params))
