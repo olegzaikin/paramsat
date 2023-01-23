@@ -11,9 +11,13 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.0.7'
+version = '0.0.8'
 
 import sys
+
+# In kissat 3.0.0, seed, statistics, verbose, and quiet do not affect the search.
+# backboneeffort is in fact not used:
+parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', 'backboneeffort']
 
 class Param:
   name = ''
@@ -27,7 +31,13 @@ def read_solver_parameters(param_file_name : str):
   with open(param_file_name, 'r') as param_file:
     lines = param_file.read().splitlines()
     for line in lines:
-      if 'seed' in line or 'statistics' in line or 'verbose' in line or 'quiet' in line:
+      # Check if a parameter must be skipped:
+      isSkip = False
+      for p in parameters_to_skip:
+        if p in line:
+          isSkip = True
+          continue
+      if isSkip:
         continue
       words = line.strip().split(' ')
       # kissat --range format:
