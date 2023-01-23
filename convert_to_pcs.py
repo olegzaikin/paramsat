@@ -11,19 +11,23 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.0.9'
+version = '0.0.10'
 
 import sys
 
 # In kissat3, seed, statistics, verbose, and quiet don't affect the search.
 # The following parameters are in fact not used:
 #   backboneeffort, eliminateeffort, eliminateinit, eliminateint,
-#   forwardeffort, probeinit, probeint.
-# The following parameters are not needed:
+#   forwardeffort, probeinit, probeint, reduceinit, reduceint, rephaseinit,
+#   rephaseint.
+# The following parameters are used but not needed:
 #   incremental - because no incremental solving occurs in parameterisation.
+#   simplify - it enables both probing and elimination, but these
+#   options have their own parameters.
 parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', \
   'backboneeffort', 'eliminateeffort', 'eliminateinit', 'eliminateint', \
-  'forwardeffort', 'incremental', 'probeinit', 'probeint']
+  'forwardeffort', 'incremental', 'probeinit', 'probeint', 'reduceinit', \
+  'reduceint', 'rephaseinit', 'rephaseint', 'simplify']
 
 class Param:
   name = ''
