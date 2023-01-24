@@ -17,23 +17,34 @@ import sys
 
 # In kissat3, seed, statistics, verbose, and quiet don't affect the search.
 # The following parameters are in fact not used:
-#   backboneeffort, eliminateeffort, eliminateinit, eliminateint,
+#   backboneeffort, bumpreasons, eliminateeffort, eliminateinit, eliminateint,
 #   forwardeffort, probeinit, probeint, reduceinit, reduceint, rephaseinit,
-#   rephaseint.
+#   rephaseint, sweepeffort, vivifyeffort, vivifyirred, walkeffort,
+#   walkinitially.
 # The following parameters are used but not needed:
 #   incremental - because no incremental solving occurs in parameterisation.
 #   simplify - it enables both probing and elimination, but these
 #   options have their own parameters.
 parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', \
-  'backboneeffort', 'eliminateeffort', 'eliminateinit', 'eliminateint', \
-  'forwardeffort', 'incremental', 'probeinit', 'probeint', 'reduceinit', \
-  'reduceint', 'rephaseinit', 'rephaseint', 'simplify']
+  'backboneeffort', 'bumpreasons', 'eliminateeffort', 'eliminateinit', \
+  'eliminateint', 'forwardeffort', 'incremental', 'probeinit', 'probeint', \
+  'reduceinit', 'reduceint', 'rephaseinit', 'rephaseint', 'simplify', \
+  'sweepeffort', 'vivifyeffort', 'vivifyirred', 'walkeffort', 'walkinitially']
 
 class Param:
   name = ''
   left_bound = -1
   right_bound = -1
   default = -1
+
+def if_parameter_str(s : str, substr : str):
+  # kissat --range style:
+  if s.startswith(substr + ' '):
+    return True
+  # cadical style
+  if '--' + substr + '=' in s:
+    return True
+  return False 
 
 # Read SAT solver's parameters:
 def read_solver_parameters(param_file_name : str):
@@ -44,9 +55,9 @@ def read_solver_parameters(param_file_name : str):
       # Check if a parameter must be skipped:
       isSkip = False
       for p in parameters_to_skip:
-        if p in line:
+        if if_parameter_str(line, p):
           isSkip = True
-          continue
+          break
       if isSkip:
         continue
       words = line.strip().split(' ')
