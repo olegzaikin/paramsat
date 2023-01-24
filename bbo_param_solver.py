@@ -12,7 +12,7 @@
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.2.2'
+version = '0.3.0'
 
 import sys
 import os
@@ -161,11 +161,110 @@ def next_value(lst : list, cur_val : int):
   assert(r[0] != cur_val)
   return r[0]
 
+def equalparamval(paramname : str, point1 : list, point2 : list, inddict : dict):
+  assert(paramname in inddict)
+  return point1[inddict[paramname]] == point2[inddict[paramname]]
+
+# Check if a given point is a possible combination of parameters: 
+def possibcomb(new_point : list, def_point : list, params : list):
+  assert(len(new_point) > 0)
+  assert(len(new_point) == len(def_point))
+  assert(len(new_point) == len(params))
+  parind = dict()
+  for i in range(len(params)):
+    parind[params[i].name] = i
+  # backbone:
+  if new_point[parind['backbone']] == 0:
+    lst = ['backbonerounds', 'backbonemaxrounds']
+    for name in lst:
+      if not equalparamval(name, new_point, def_point, parind):
+        return False
+  # bump:
+  if new_point[parind['bump']] == 'false':
+    lst = ['bumpreasonslimit', 'bumpreasonsrate', 'decay']
+    for name in lst:
+      if not equalparamval(name, new_point, def_point, parind):
+        return False
+  # chrono:
+  if new_point[parind['chrono']] == 'false':
+    if not equalparamval('chronolevels', new_point, def_point, parind):
+      return False
+  # compact:
+  if new_point[parind['compact']] == 'false':
+    if not equalparamval('compactlim', new_point, def_point, parind):
+      return False
+  # definitions:
+  if new_point[parind['definitions']] == 'false':
+    lst = ['definitioncores', 'definitionticks']
+    for name in lst:
+      if not equalparamval(name, new_point, def_point, parind):
+        return False
+  # eliminate:
+  if new_point[parind['eliminate']] == 'false':
+    lst = ['eliminatebound', 'eliminateclslim', 'eliminateocclim', \
+      'eliminaterounds', 'forward']
+    for name in lst:
+      if not equalparamval(name, new_point, def_point, parind):
+        return False
+  # minimize:
+  if new_point[parind['minimize']] == 'false':
+    lst = ['minimizedepth', 'minimizeticks']
+    for name in lst:
+      if not equalparamval(name, new_point, def_point, parind):
+        return False
+  # substitute:
+  if new_point[parind['substitute']] == 'false':
+    lst = ['substituteeffort', 'substituterounds']
+    for name in lst:
+      if not equalparamval(name, new_point, def_point, parind):
+        return False
+  # sweep:
+  if new_point[parind['sweep']] == 'false':
+    lst = ['sweepclauses', 'sweepdepth', 'sweepfliprounds', 'sweepmaxclauses', \
+      'sweepmaxdepth', 'sweepmaxvars', 'sweepvars']
+    for name in lst:
+      if not equalparamval(name, new_point, def_point, parind):
+        return False
+  # vivify:
+  if new_point[parind['vivify']] == 'false':
+    lst = ['vivifytier1', 'vivifytier2']
+    for name in lst:
+      if not equalparamval(name, new_point, def_point, parind):
+        return False
+  return True
+
+def test_possibcomb(def_point : list, params : list):
+  new_point = copy.deepcopy(def_point)
+  new_point[1] = 0 # backbone
+  new_point[2] = 1
+  new_point[3] = 100
+  new_point2 = copy.deepcopy(def_point)
+  new_point2[1] = 0 # backbone
+  new_point2[2] = 1000 # default
+  new_point2[3] = 100 # default
+  new_point3 = copy.deepcopy(def_point)
+  new_point3[4] = 'true' # bump
+  new_point3[5] = 1
+  new_point3[6] = 1
+  new_point3[11] = 1
+  new_point4 = copy.deepcopy(def_point)
+  new_point4[4] = 'false' # bump
+  new_point4[5] = 1
+  new_point4[6] = 1
+  new_point4[11] = 1
+  assert(possibcomb(def_point, def_point, params) == True)
+  assert(possibcomb(new_point, def_point, params) == False)
+  assert(possibcomb(new_point2, def_point, params) == True)
+  assert(possibcomb(new_point3, def_point, params) == True)
+  assert(possibcomb(new_point4, def_point, params) == False)
+
 # Generate new points via (1+1)-EA:
 def oneplusone(point : list, params : list, points_num : int):
   global random
   global generated_points
-  global skipped_points_num
+  global def_point
+  global skipped_repeat_num
+  global skipped_impos_num
   assert(len(point) == len(params))
   probability = 1/len(params)
   # Change each value with probability:
@@ -178,12 +277,21 @@ def oneplusone(point : list, params : list, points_num : int):
         oldval = pnt[i]
         pnt[i] = next_value(params[i].values, pnt[i])
         assert(pnt != point)
-    if strlistrepr(pnt) not in generated_points:
+    # Check if point is impossible combination:
+    if not possibcomb(pnt, def_point, params):
+      print('Impossible combination:')
+      print(strlistrepr(pnt))
+      skipped_impos_num += 1
+      print(str(skipped_impos_num) + ' impossible points skipped')
+      continue
+    # If point has been already processed:
+    if strlistrepr(pnt) in generated_points:
+      skipped_repeat_num += 1
+      print(str(skipped_repeat_num) + ' repeated points skipped')
+    else:
+      # New point and possible combination:
       generated_points.add(strlistrepr(pnt))
       new_points.append(pnt)
-    else:
-      skipped_points_num += 1
-      print(str(skipped_points_num) + ' points skipped')
   return new_points
 
 def points_diff(p1 : list, p2 : list, params : list):
@@ -289,6 +397,9 @@ if __name__ == '__main__':
   print('Default point :')
   print(str(def_point) + '\n')
 
+  # Test:
+  test_possibcomb(def_point, params)
+
   best_t = -1
 
   command = ''
@@ -308,7 +419,8 @@ if __name__ == '__main__':
   runtime_def_point = best_t
   best_point = copy.deepcopy(def_point)
   best_command = command
-  skipped_points_num = 0
+  skipped_repeat_num = 0
+  skipped_impos_num = 0
   updates_num = 0
 
   while True:
@@ -332,7 +444,9 @@ if __name__ == '__main__':
       break
 
   print('\n' + str(updates_num) + " updates of best point")
-  print(str(skipped_points_num) + ' skipped points')
+  print(str(skipped_repeat_num + skipped_impos_num) + ' skipped points, of them:')
+  print('  ' + str(skipped_repeat_num ) + ' repeated points')
+  print('  ' + str(skipped_impos_num) + ' impossible-combination points')
   print(str(processed_points_num) + ' processed points')
   print('Final best time : ' + str(best_t) + ' , so ' + \
     str(runtime_def_point) + ' -> ' + str(best_t))
