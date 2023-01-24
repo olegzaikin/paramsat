@@ -17,7 +17,7 @@ import sys
 
 # In kissat3, seed, statistics, verbose, and quiet don't affect the search.
 # The following parameters are in fact not used:
-#   backboneeffort, bumpreasons, eliminateeffort, eliminateinit, eliminateint,
+#   backboneeffort, eliminateeffort, eliminateinit, eliminateint,
 #   forwardeffort, probeinit, probeint, reduceinit, reduceint, rephaseinit,
 #   rephaseint, sweepeffort, vivifyeffort, vivifyirred, walkeffort,
 #   walkinitially.
