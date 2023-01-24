@@ -25,6 +25,7 @@ import sys
 #   incremental - because no incremental solving occurs in parameterisation.
 #   simplify - it enables both probing and elimination, but these
 #   options have their own parameters.
+#   bumpreasons - it almost duplicates bump.
 parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', \
   'backboneeffort', 'bumpreasons', 'eliminateeffort', 'eliminateinit', \
   'eliminateint', 'forwardeffort', 'incremental', 'probeinit', 'probeint', \
@@ -44,7 +45,7 @@ def if_parameter_str(s : str, substr : str):
   # cadical style
   if '--' + substr + '=' in s:
     return True
-  return False 
+  return False
 
 # Read SAT solver's parameters:
 def read_solver_parameters(param_file_name : str):
