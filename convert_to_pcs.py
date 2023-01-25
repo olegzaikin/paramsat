@@ -11,26 +11,70 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.0.10'
+version = '0.1.0'
 
 import sys
 
-# In kissat3, seed, statistics, verbose, and quiet don't affect the search.
+# In kissat3, seed, statistics, verbose, quiet, and prifile don't affect the search.
 # The following parameters are in fact not used:
 #   backboneeffort, eliminateeffort, eliminateinit, eliminateint,
 #   forwardeffort, probeinit, probeint, reduceinit, reduceint, rephaseinit,
 #   rephaseint, sweepeffort, vivifyeffort, vivifyirred, walkeffort,
 #   walkinitially.
 # The following parameters are used but not needed:
+#   bump - disables an obligatory CDCL feature.
+#   compact - false-value can be reached by compactlim=0
+#   minimze - false-value can be reached by minimize* parameters
+#   chrono - false-value can be reached by chronolevels=0
+#   backbonemaxrounds - should be constant for a variable backbonerounds
+#   sweep - false-vale can be reached by sweep* parameters
+#   sweepmaxvars - should be constant for a variable sweepvars
 #   incremental - because no incremental solving occurs in parameterisation.
 #   simplify - it enables both probing and elimination, but these
 #   options have their own parameters.
 #   bumpreasons - it almost duplicates bump.
-parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', \
+parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', 'profile', \
   'backboneeffort', 'bumpreasons', 'eliminateeffort', 'eliminateinit', \
   'eliminateint', 'forwardeffort', 'incremental', 'probeinit', 'probeint', \
   'reduceinit', 'reduceint', 'rephaseinit', 'rephaseint', 'simplify', \
-  'sweepeffort', 'vivifyeffort', 'vivifyirred', 'walkeffort', 'walkinitially']
+  'sweepeffort', 'vivifyeffort', 'vivifyirred', 'walkeffort', 'walkinitially', \
+  'bump', 'compact', 'minimize', 'chrono', 'backbonemaxrounds', 'sweep', \
+  'sweepmaxvars']
+
+# The following parameters values are chosen manually, here _*_ means default:
+# backbonerounds 1, 10, _100_, 1000
+# bumpreasonsrate 1, 2, 4, 8, _10_, 16, 32, 64, 128, 256, 512, 2147483647
+# bumpreasonslimit 1, 2, 4, 8, _10_, 16, 32, 64, 128, 256, 512, 2147483647
+# chronolevels 0, 10, _100_, 1000, 2147483647
+# definitionticks 0, 100, 10000, _1000000_, 100000000, 2147483647
+# defragsize 10, 2048, _262144_, 16777216, 2147483647
+# eliminateclslim 1, 10, _100_, 1000, 2147483647
+# eliminaterounds 1, _2_, 4, 8, 16, 32, 10000
+# emafast 10, 20, _33_, 40, 50, 100, 1000000
+# emaslow 100, 50000, 75000, _100000_, 125000, 150000, 1000000
+# mineffort 0, 5, _10_, 15, 20, 2147483647
+# minimizedepth 1, 10, 100, _1000_, 10000, 1000000
+# modeinit 10, 100, _1000_, 10000, 100000, 100000000
+# reducefraction 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, _75_, 80, 85, 90, 95, 100
+# reluctantint 2, 256, 512, _1024_, 2048, 4096, 32768
+# reluctantlim 0, 65536, 262144, _1048576_, 4194304, 16777216, 1073741824
+# restartint _1_, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000
+# restartmargin 0, 5, _10_, 15, 20, 25
+# substituteeffort 1, 2, 4, _10_, 16, 32, 64, 1000
+# substituterounds 1, _2_, 4, 8, 16, 32, 64, 100
+# subsumeclslim 1, 10, 100, _1000_, 10000, 2147483647
+# subsumeocclim 0, 1, 10, 100, _1000_, 10000, 2147483647
+# sweepclauses 0, 256, 512, _1024_, 2048, 4096, 2147483647
+# sweepdepth 0, _1_, 2, 3, 4, 5, 2147483647
+# sweepeffort 0, 5, _10_, 15, 20, 100, 10000
+# sweepfliprounds 0, _1_, 2, 3, 4, 5, 10, 100, 2147483647
+# sweepmaxclauses 2, 1024, 2048, _4096_, 8192, 16384, 2147483647
+# sweepmaxdepth 1, _2_, 3, 4, 5, 10, 2147483647
+# sweepvars 0, 1, 2, 4, 8, 16, 32, 64, _128_
+# tier1 1, _2_, 3, 4, 5, 6, 7, 8, 9, 10, 100
+# tier2 1, 2, 3, 4, 5, _6_, 7, 8, 9, 10, 100, 1000
+# vivifytier1 1, 2, _3_, 4, 5, 6, 7, 8, 9, 10, 100
+# vivifytier2 1, 2, 3, 4, 5, _6_, 7, 8, 9, 10, 100
 
 class Param:
   name = ''
@@ -107,8 +151,12 @@ def read_solver_parameters(param_file_name : str):
 def domain_to_str(name : str, default : int, values : list):
   assert(name != '')
   assert(len(values) > 0)
-  assert(default in values)
   s = name + ' {'
+  if values == ['false', 'true']:
+    default_bool = 'true' if default == 1 else 'false'
+    s += 'false, true}[' + default_bool + ']'
+    return s
+  assert(default in values)
   for i in values:
     s += str(i)
     if i != values[-1]:
@@ -130,16 +178,79 @@ if __name__ == '__main__':
   # Convert each parameter to the PCS format:
   pcs_str = ''
   for p in params:
+    # Manually chosen values:
+    if p.name == 'backbonerounds':
+      values = [1, 10, 100, 1000]
+    elif p.name == 'bumpreasonsrate':
+      values = [1, 2, 4, 8, 10, 16, 32, 64, 128, 256, 512, 2147483647]
+    elif p.name == 'bumpreasonslimit':
+      values = [1, 2, 4, 8, 10, 16, 32, 64, 128, 256, 512, 2147483647]
+    elif p.name == 'chronolevels':
+      values = [0, 10, 100, 1000, 2147483647]
+    elif p.name == 'definitionticks': 
+      values = [0, 100, 10000, 1000000, 100000000, 2147483647]
+    elif p.name == 'defragsize': 
+      values = [10, 2048, 262144, 16777216, 2147483647]
+    elif p.name == 'eliminateclslim': 
+      values = [1, 10, 100, 1000, 2147483647]
+    elif p.name == 'eliminaterounds': 
+      values = [1, 2, 4, 8, 16, 32, 10000]
+    elif p.name == 'emafast': 
+      values = [10, 20, 33, 40, 50, 100, 1000000]
+    elif p.name == 'emaslow': 
+      values = [100, 50000, 75000, 100000, 125000, 150000, 1000000]
+    elif p.name == 'mineffort': 
+      values = [0, 5, 10, 15, 20, 2147483647]
+    elif p.name == 'minimizedepth': 
+      values = [1, 10, 100, 1000, 10000, 1000000]
+    elif p.name == 'modeinit': 
+      values = [10, 100, 1000, 10000, 100000, 100000000]
+    elif p.name == 'reducefraction': 
+      values = [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100]
+    elif p.name == 'reluctantint': 
+      values = [2, 256, 512, 1024, 2048, 4096, 32768]
+    elif p.name == 'reluctantlim': 
+      values = [0, 65536, 262144, 1048576, 4194304, 16777216, 1073741824]
+    elif p.name == 'restartint': 
+      values = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000]
+    elif p.name == 'restartmargin': 
+      values = [0, 5, 10, 15, 20, 25]
+    elif p.name == 'substituteeffort': 
+      values = [1, 2, 4, 10, 16, 32, 64, 1000]
+    elif p.name == 'substituterounds': 
+      values = [1, 2, 4, 8, 16, 32, 64, 100]
+    elif p.name == 'subsumeclslim': 
+      values = [1, 10, 100, 1000, 10000, 2147483647]
+    elif p.name == 'subsumeocclim': 
+      values = [0, 1, 10, 100, 1000, 10000, 2147483647]
+    elif p.name == 'sweepclauses': 
+      values = [0, 256, 512, 1024, 2048, 4096, 2147483647]
+    elif p.name == 'sweepdepth': 
+      values = [0, 1, 2, 3, 4, 5, 2147483647]
+    elif p.name == 'sweepeffort': 
+      values = [0, 5, 10, 15, 20, 100, 10000]
+    elif p.name == 'sweepfliprounds': 
+      values = [0, 1, 2, 3, 4, 5, 10, 100, 2147483647]
+    elif p.name == 'sweepmaxclauses': 
+      values = [2, 1024, 2048, 4096, 8192, 16384, 2147483647]
+    elif p.name == 'sweepmaxdepth': 
+      values = [1, 2, 3, 4, 5, 10, 2147483647]
+    elif p.name == 'sweepvars': 
+      values = [0, 1, 2, 4, 8, 16, 32, 64, 128]
+    elif p.name == 'tier1': 
+      values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100]
+    elif p.name == 'tier2': 
+      values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100, 1000]
+    elif p.name == 'vivifytier1': 
+      values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100]
+    elif p.name == 'vivifytier2': 
+      values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100]
     # If Boolean:
-    if p.left_bound == 0 and p.right_bound == 1:
-      default_bool = 'true' if p.default == 1 else 'false'
-      pcs_str += p.name + ' {false, true}[' + default_bool + ']'
-      values_num += 2
+    elif p.left_bound == 0 and p.right_bound == 1:
+      values = ['false', 'true']
     # If integer with few values:
     elif int(p.right_bound) - int(p.left_bound) < 10: # e.g. [0,9] or [11,20]
       values = [i for i in range(p.left_bound, p.right_bound + 1)]
-      pcs_str += domain_to_str(p.name, p.default, values)
-      values_num += len(values)
     # If integer with too many values, use logariphmic steps:
     else:
       koef = 2 if int(p.right_bound) - int(p.left_bound) <= 100000 else 4
@@ -159,9 +270,9 @@ if __name__ == '__main__':
       if p.default not in values:
         values.append(p.default)
       values = sorted(values)
-      pcs_str += domain_to_str(p.name, p.default, values)
-      values_num += len(values)
+    pcs_str += domain_to_str(p.name, p.default, values)
     pcs_str += '\n'
+    values_num += len(values)
 
   print('')
   print(str(values_num) + ' values in ' + str(len(params)) + ' domains')

@@ -12,7 +12,7 @@
 #==============================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.3.0'
+version = '0.3.1'
 
 import sys
 import os
@@ -175,24 +175,10 @@ def possibcomb(new_point : list, def_point : list, params : list):
     parind[params[i].name] = i
   # backbone:
   if new_point[parind['backbone']] == 0:
-    lst = ['backbonerounds', 'backbonemaxrounds']
+    lst = ['backbonerounds']
     for name in lst:
       if not equalparamval(name, new_point, def_point, parind):
         return False
-  # bump:
-  if new_point[parind['bump']] == 'false':
-    lst = ['bumpreasonslimit', 'bumpreasonsrate', 'decay']
-    for name in lst:
-      if not equalparamval(name, new_point, def_point, parind):
-        return False
-  # chrono:
-  if new_point[parind['chrono']] == 'false':
-    if not equalparamval('chronolevels', new_point, def_point, parind):
-      return False
-  # compact:
-  if new_point[parind['compact']] == 'false':
-    if not equalparamval('compactlim', new_point, def_point, parind):
-      return False
   # definitions:
   if new_point[parind['definitions']] == 'false':
     lst = ['definitioncores', 'definitionticks']
@@ -206,22 +192,9 @@ def possibcomb(new_point : list, def_point : list, params : list):
     for name in lst:
       if not equalparamval(name, new_point, def_point, parind):
         return False
-  # minimize:
-  if new_point[parind['minimize']] == 'false':
-    lst = ['minimizedepth', 'minimizeticks']
-    for name in lst:
-      if not equalparamval(name, new_point, def_point, parind):
-        return False
   # substitute:
   if new_point[parind['substitute']] == 'false':
     lst = ['substituteeffort', 'substituterounds']
-    for name in lst:
-      if not equalparamval(name, new_point, def_point, parind):
-        return False
-  # sweep:
-  if new_point[parind['sweep']] == 'false':
-    lst = ['sweepclauses', 'sweepdepth', 'sweepfliprounds', 'sweepmaxclauses', \
-      'sweepmaxdepth', 'sweepmaxvars', 'sweepvars']
     for name in lst:
       if not equalparamval(name, new_point, def_point, parind):
         return False
@@ -236,27 +209,13 @@ def possibcomb(new_point : list, def_point : list, params : list):
 def test_possibcomb(def_point : list, params : list):
   new_point = copy.deepcopy(def_point)
   new_point[1] = 0 # backbone
-  new_point[2] = 1
-  new_point[3] = 100
+  new_point[2] = 100 # default
   new_point2 = copy.deepcopy(def_point)
   new_point2[1] = 0 # backbone
-  new_point2[2] = 1000 # default
-  new_point2[3] = 100 # default
-  new_point3 = copy.deepcopy(def_point)
-  new_point3[4] = 'true' # bump
-  new_point3[5] = 1
-  new_point3[6] = 1
-  new_point3[11] = 1
-  new_point4 = copy.deepcopy(def_point)
-  new_point4[4] = 'false' # bump
-  new_point4[5] = 1
-  new_point4[6] = 1
-  new_point4[11] = 1
+  new_point2[2] = 1
   assert(possibcomb(def_point, def_point, params) == True)
-  assert(possibcomb(new_point, def_point, params) == False)
-  assert(possibcomb(new_point2, def_point, params) == True)
-  assert(possibcomb(new_point3, def_point, params) == True)
-  assert(possibcomb(new_point4, def_point, params) == False)
+  assert(possibcomb(new_point, def_point, params) == True)
+  assert(possibcomb(new_point2, def_point, params) == False)
 
 # Generate new points via (1+1)-EA:
 def oneplusone(point : list, params : list, points_num : int):
