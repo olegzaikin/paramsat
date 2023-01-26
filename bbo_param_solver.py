@@ -12,7 +12,7 @@
 #========================================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.4.0'
+version = '0.4.1'
 
 import sys
 import glob
@@ -300,6 +300,7 @@ def calc_obj(solver_name : str, solver_timelim : float, cnfs : list, \
     sys_str += cnf_file_name
     o = os.popen(sys_str).read()
     t, sat = parse_cdcl_time(o)
+    print('Time : ' + str(t))
     assert(t > 0)
     if solver_timelim > 0 and t >= solver_timelim:
       par10_time += solver_timelim * 10
@@ -425,6 +426,7 @@ if __name__ == '__main__':
     assert(sat == 1)
     assert(p == def_point)
   print('Current best PAR10 time : ' + str(best_par10_time))
+  print('Current best solver time limit : ' + str(best_solver_timelim))
   if command != '':
     print(command + '\n')
 
