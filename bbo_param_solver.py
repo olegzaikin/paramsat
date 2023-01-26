@@ -8,11 +8,11 @@
 # parameters' values via blackbox optimization algorithms.
 #
 # Example:
-#   python3 ./bbo_param_solver.py kissat3 ./kissat3.pcs ./problem.cnf -seed=1
-#==============================================================================
+#   python3 ./bbo_param_solver.py ./kissat3 ./kissat3.pcs ./problem.cnf -seed=1 -cpunum=2
+#========================================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.3.1'
+version = '0.3.2'
 
 import sys
 import os
@@ -256,6 +256,8 @@ def oneplusone(point : list, params : list, points_num : int):
 def points_diff(p1 : list, p2 : list, params : list):
   assert(len(p1) == len(p2))
   assert(len(p1) == len(params))
+  if p1 == p2:
+    return ''
   s0 = 'Difference from the default point : \n'
   s = ''
   for i in range(len(p1)):
@@ -290,6 +292,7 @@ def collect_result(res):
   global def_point
   global params
   global processed_points_num
+  global start_time
   assert(len(res) == 4)
   point = res[0]
   t = res[1]
@@ -303,7 +306,9 @@ def collect_result(res):
     best_t = t
     best_point = copy.deepcopy(p)
     best_command = command
-    print('Updated best time : ' + str(best_t))
+    elapsed_time = round(time.time() - start_time, 2)
+    print('\nUpdated best time : ' + str(best_t))
+    print('elapsed : ' + str(elapsed_time) + ' seconds')
     print(points_diff(def_point, best_point, params))
     print(best_command + '\n')
 
@@ -321,6 +326,8 @@ if __name__ == '__main__':
     exit(1)
 
   print('Running script ' + script_name + ' of version ' + version)
+
+  start_time = time.time()
 
   solver_name = sys.argv[1]
   param_file_name = sys.argv[2]
@@ -355,6 +362,9 @@ if __name__ == '__main__':
 
   print('Default point :')
   print(str(def_point) + '\n')
+
+  elapsed_time = round(time.time() - start_time, 2)
+  print('elapsed : ' + str(elapsed_time) + ' seconds')
 
   # Test:
   test_possibcomb(def_point, params)
@@ -402,12 +412,15 @@ if __name__ == '__main__':
       print('The limit on the number of points is reached, break.')
       break
 
-  print('\n' + str(updates_num) + " updates of best point")
+  elapsed_time = round(time.time() - start_time, 2)
+  print('\nelapsed : ' + str(elapsed_time) + ' seconds')
+  print(str(updates_num) + " updates of best point")
   print(str(skipped_repeat_num + skipped_impos_num) + ' skipped points, of them:')
   print('  ' + str(skipped_repeat_num ) + ' repeated points')
   print('  ' + str(skipped_impos_num) + ' impossible-combination points')
   print(str(processed_points_num) + ' processed points')
   print('Final best time : ' + str(best_t) + ' , so ' + \
     str(runtime_def_point) + ' -> ' + str(best_t))
-  print(points_diff(def_point, best_point, params))
+  if updates_num > 0:
+    print(points_diff(def_point, best_point, params))
   print('Final best command : \n' + best_command)
