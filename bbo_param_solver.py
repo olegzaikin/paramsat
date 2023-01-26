@@ -8,13 +8,14 @@
 # parameters' values via blackbox optimization algorithms.
 #
 # Example:
-#   python3 ./bbo_param_solver.py ./kissat3 ./kissat3.pcs ./problem.cnf -seed=1 -cpunum=2
+#   python3 ./bbo_param_solver.py ./kissat3 ./kissat3.pcs ./cnfs/ -seed=1 -cpunum=2
 #========================================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.3.2'
+version = '0.4.0'
 
 import sys
+import glob
 import os
 import time
 import random
@@ -25,34 +26,40 @@ import string
 import multiprocessing as mp
 
 def print_usage():
-  print('Usage : ' + script_name + ' solver solver-parameters-file cnf-file [Options]')
+  print('Usage : ' + script_name + ' solver solver-parameters cnfs-folder [Options]')
   print('  Options :\n' +\
-  '-deftime=<float>    - (default : -1)   runtime for the default point' + '\n' +\
-  '-maxpoints=<int>    - (default : 1000) maximum number of points to process' + '\n' +\
-  '-cpunum=<int>       - (default : 1)    number of used CPU cores' + '\n' +\
-  '-seed=<int>         - (default : time) seed for pseudorandom generator' + '\n')
+  '-defobj=<float>        - (default : -1)   objective funtion value for the default point' + '\n' +\
+  '-solvertimelim=<float> - (default : -1)   time limit in seconds on solver' + '\n' +\
+  '-maxpoints=<int>       - (default : 1000) maximum number of points to process' + '\n' +\
+  '-cpunum=<int>          - (default : 1)    number of used CPU cores' + '\n' +\
+  '-seed=<int>            - (default : time) seed for pseudorandom generator' + '\n')
 
 # Input options:
 class Options:
-	def_point_time : -1
+	def_point_time = -1
+	solver_timelim = -1
 	max_points = 1000
-	cpu_num : 1
-	seed : 0
+	cpu_num = 1
+	seed = 0
 	def __init__(self):
 		self.def_point_time = -1
+		self.solvertimelim = -1
 		self.max_points = 1000
 		self.cpu_num = 1
 		self.seed = round(time.time() * 1000)
 	def __str__(self):
-		s = 'def_point_time : ' + str(self.def_point_time) + '\n' +\
-                    'max_points     : ' + str(self.max_points) + '\n' +\
-                    'cpu_num        : ' + str(self.cpu_num) + '\n' +\
-		    'seed           : ' + str(self.seed) + '\n'
+		s = 'def_point_time  : ' + str(self.def_point_time) + '\n' +\
+        'solver_timelim  : ' + str(self.solver_timelim) + '\n' +\
+        'max_points      : ' + str(self.max_points) + '\n' +\
+        'cpu_num         : ' + str(self.cpu_num) + '\n' +\
+		    'seed            : ' + str(self.seed) + '\n'
 		return s
 	def read(self, argv) :
 		for p in argv:
-			if '-deftime' in p:
-				self.def_point_time = math.ceil(float(p.split('-deftime=')[1]))
+			if '-defobj' in p:
+				self.def_point_time = math.ceil(float(p.split('-defobj=')[1]))
+			if '-solvertimelim' in p:
+				self.solver_timelim = math.ceil(float(p.split('-solvertimelim=')[1]))
 			if '-maxpoints' in p:
 				self.max_points = math.ceil(float(p.split('-maxpoints=')[1]))
 			if '-cpunum=' in p:
@@ -133,6 +140,7 @@ def kill_solver(solver : str):
   sys_str = 'killall -9 ' + solver.replace('./','')
   o = os.popen(sys_str).read()
 
+# Create a copy of a given solver to kill the latter safely:
 def create_solver_copy(solver_name : str, random_str : str):
   new_solver_name = solver_name + '_' + random_str
   print("Creating solver " + new_solver_name)
@@ -161,6 +169,7 @@ def next_value(lst : list, cur_val : int):
   assert(r[0] != cur_val)
   return r[0]
 
+# Whether two given points are equal:
 def equalparamval(paramname : str, point1 : list, point2 : list, inddict : dict):
   assert(paramname in inddict)
   return point1[inddict[paramname]] == point2[inddict[paramname]]
@@ -174,38 +183,39 @@ def possibcomb(new_point : list, def_point : list, params : list):
   for i in range(len(params)):
     parind[params[i].name] = i
   # backbone:
-  if new_point[parind['backbone']] == 0:
+  if 'backbone' in parind and new_point[parind['backbone']] == 0:
     lst = ['backbonerounds']
     for name in lst:
       if not equalparamval(name, new_point, def_point, parind):
         return False
   # definitions:
-  if new_point[parind['definitions']] == 'false':
+  if 'definitions' in parind and new_point[parind['definitions']] == 'false':
     lst = ['definitioncores', 'definitionticks']
     for name in lst:
       if not equalparamval(name, new_point, def_point, parind):
         return False
   # eliminate:
-  if new_point[parind['eliminate']] == 'false':
+  if 'eliminate' in parind and new_point[parind['eliminate']] == 'false':
     lst = ['eliminatebound', 'eliminateclslim', 'eliminateocclim', \
       'eliminaterounds', 'forward']
     for name in lst:
       if not equalparamval(name, new_point, def_point, parind):
         return False
   # substitute:
-  if new_point[parind['substitute']] == 'false':
+  if 'substitute' in parind and new_point[parind['substitute']] == 'false':
     lst = ['substituteeffort', 'substituterounds']
     for name in lst:
       if not equalparamval(name, new_point, def_point, parind):
         return False
   # vivify:
-  if new_point[parind['vivify']] == 'false':
+  if 'vivify' in parind and new_point[parind['vivify']] == 'false':
     lst = ['vivifytier1', 'vivifytier2']
     for name in lst:
       if not equalparamval(name, new_point, def_point, parind):
         return False
   return True
 
+# Test detection of possible combinations of parameters' values:
 def test_possibcomb(def_point : list, params : list):
   new_point = copy.deepcopy(def_point)
   new_point[1] = 0 # backbone
@@ -253,6 +263,7 @@ def oneplusone(point : list, params : list, points_num : int):
       new_points.append(pnt)
   return new_points
 
+# Difference between two given points (empty string if equal points):
 def points_diff(p1 : list, p2 : list, params : list):
   assert(len(p1) == len(p2))
   assert(len(p1) == len(params))
@@ -268,50 +279,80 @@ def points_diff(p1 : list, p2 : list, params : list):
   return s0 + s[:-1]
 
 # Run solver on a given point:
-def run_solver(solver_name : str, time_lim : float, cnf_file_name : str, params : list, point : list):
+def calc_obj(solver_name : str, solver_timelim : float, cnfs : list, \
+  params : list, point : list):
   assert(len(params) > 1)
   assert(len(params) == len(point))
-  sys_str = ''
-  if time_lim > 0:
-    sys_str = solver_name + ' --time=' + str(math.ceil(time_lim) + 1) + ' '
-  else:
-    sys_str = solver_name + ' '
-  for i in range(len(params)):
-    sys_str += '--' + params[i].name + '=' + str(point[i]) + ' '
-  sys_str += cnf_file_name
-  o = os.popen(sys_str).read()
-  t, sat = parse_cdcl_time(o)
-  return point, t, sat, sys_str
+  assert(len(cnfs) > 0)
+  par10_time = 0
+  max_time = -1
+  sat = -1
+  # Calculate PAR10 for the solver runtimes: sum(time if solved in lim seconds,
+  # otherwise lim*10)
+  for cnf_file_name in cnfs:
+    sys_str = ''
+    if solver_timelim > 0:
+      sys_str = solver_name + ' --time=' + str(math.ceil(solver_timelim)) + ' '
+    else:
+      sys_str = solver_name + ' '
+    for i in range(len(params)):
+      sys_str += '--' + params[i].name + '=' + str(point[i]) + ' '
+    sys_str += cnf_file_name
+    o = os.popen(sys_str).read()
+    t, sat = parse_cdcl_time(o)
+    assert(t > 0)
+    if solver_timelim > 0 and t >= solver_timelim:
+      par10_time += solver_timelim * 10
+    else:
+      par10_time += t
+      max_time = t if max_time < t else max_time
+
+  return point, par10_time, max_time, sat, sys_str
 
 # Collect a result produxed by solver:
 def collect_result(res):
   global updates_num
-  global best_t
+  global best_par10_time
+  global best_solver_timelim
   global best_point
   global best_command
   global def_point
   global params
   global processed_points_num
   global start_time
-  assert(len(res) == 4)
+  assert(len(res) == 5)
   point = res[0]
-  t = res[1]
-  sat = res[2]
-  command = res[3]
-  print('Time : ' + str(t) + ' seconds')
+  par10_time = res[1]
+  max_time = res[2]
+  sat = res[3]
+  command = res[4]
+  print('PAR10 time : ' + str(par10_time) + ' seconds')
+  print('max_time : ' + str(max_time) + ' seconds')
   processed_points_num += 1
   print(str(processed_points_num) + ' points processed')
-  if sat == 1 and t < best_t:
+  if sat == 1 and par10_time < best_par10_time:
     updates_num += 1
-    best_t = t
+    best_par10_time = par10_time
     best_point = copy.deepcopy(p)
     best_command = command
     elapsed_time = round(time.time() - start_time, 2)
-    print('\nUpdated best time : ' + str(best_t))
+    print('\nUpdated best PAR10 time : ' + str(best_par10_time))
+    if max_time < best_solver_timelim:
+      best_solver_timelim = max_time
+      print('Updated best solver max time : ' + str(best_solver_timelim))
     print('elapsed : ' + str(elapsed_time) + ' seconds')
     print(points_diff(def_point, best_point, params))
     print(best_command + '\n')
 
+# Read all CNFs in a given folder:
+def read_cnfs(cnfs_folder_name : str):
+  cnfs = list()
+  os.chdir('.')
+  for file in glob.glob(cnfs_folder_name + '/*.cnf'):
+    cnfs.append(file)
+  return cnfs
+
+# String-representation of a given point:
 def strlistrepr(lst : list):
   assert(len(lst) > 1)
   s = ''
@@ -331,11 +372,11 @@ if __name__ == '__main__':
 
   solver_name = sys.argv[1]
   param_file_name = sys.argv[2]
-  cnf_file_name = sys.argv[3]
+  cnfs_folder_name = sys.argv[3]
 
   print('solver_name : ' + solver_name)
   print('param_file_name : ' + param_file_name)
-  print('cnf_file_name : ' + cnf_file_name)
+  print('cnfs_folder_name : ' + cnfs_folder_name)
 
   op = Options()
   op.read(sys.argv[3:])
@@ -363,29 +404,37 @@ if __name__ == '__main__':
   print('Default point :')
   print(str(def_point) + '\n')
 
-  elapsed_time = round(time.time() - start_time, 2)
-  print('elapsed : ' + str(elapsed_time) + ' seconds')
+  cnfs = []
+  cnfs = read_cnfs(cnfs_folder_name)
+  assert(len(cnfs) > 0)
+  print(str(len(cnfs)) + ' CNFs were read :')
+  for cnf in cnfs:
+    print(cnf)
 
   # Test:
   test_possibcomb(def_point, params)
 
-  best_t = -1
+  best_par10_time = -1
+  best_solver_timelim = op.solver_timelim
 
   command = ''
   if op.def_point_time > 0:
-    best_t = op.def_point_time
+    best_par10_time = op.def_point_time
   else:
-    p, best_t, sat, command = run_solver(solver_name, -1, cnf_file_name, params, def_point)
+    p, best_par10_time, best_solver_timelim, sat, command = calc_obj(solver_name, -1, cnfs, params, def_point)
     assert(sat == 1)
     assert(p == def_point)
-  print('Current best solving time : ' + str(best_t))
+  print('Current best PAR10 time : ' + str(best_par10_time))
   if command != '':
     print(command + '\n')
+
+  elapsed_time = round(time.time() - start_time, 2)
+  print('elapsed : ' + str(elapsed_time) + ' seconds')
 
   generated_points = set()
   generated_points.add(strlistrepr(def_point))
   processed_points_num = 1 # the default point is processed
-  runtime_def_point = best_t
+  runtime_def_point = best_par10_time
   best_point = copy.deepcopy(def_point)
   best_command = command
   skipped_repeat_num = 0
@@ -399,7 +448,7 @@ if __name__ == '__main__':
     # Process all points in parallel:
     pool = mp.Pool(op.cpu_num)
     for p in new_points:
-      pool.apply_async(run_solver, args=(solver_name, best_t, cnf_file_name, params, p), callback=collect_result)
+      pool.apply_async(calc_obj, args=(solver_name, best_solver_timelim, cnfs, params, p), callback=collect_result)
     while len(pool._cache) == op.cpu_num: # While all CPU cores are busy,
       time.sleep(2)                       # wait.
     # Here at least 1 task is completed. It might be because of the best
@@ -419,8 +468,8 @@ if __name__ == '__main__':
   print('  ' + str(skipped_repeat_num ) + ' repeated points')
   print('  ' + str(skipped_impos_num) + ' impossible-combination points')
   print(str(processed_points_num) + ' processed points')
-  print('Final best time : ' + str(best_t) + ' , so ' + \
-    str(runtime_def_point) + ' -> ' + str(best_t))
+  print('Final best PAR10 time : ' + str(best_par10_time) + ' , so ' + \
+    str(runtime_def_point) + ' -> ' + str(best_par10_time))
   if updates_num > 0:
     print(points_diff(def_point, best_point, params))
   print('Final best command : \n' + best_command)
