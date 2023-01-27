@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.1.2'
+version = '0.1.3'
 
 import sys
 
@@ -53,6 +53,7 @@ parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', 'profile', \
 # definitionticks 0, 100, 10000, _1000000_, 100000000, 2147483647
 # defragsize 10, 2048, _262144_, 16777216, 2147483647
 # eliminateclslim 1, 10, _100_, 1000, 2147483647
+# eliminateocclim 0, 1000, _2000_, 3000, 2147483647
 # eliminaterounds 1, _2_, 4, 8, 16, 32, 10000
 # emafast 10, 20, _33_, 40, 50, 100, 1000000
 # emaslow 100, 50000, 75000, _100000_, 125000, 150000, 1000000
@@ -191,63 +192,65 @@ if __name__ == '__main__':
       values = [1, 2, 4, 8, 10, 16, 32, 64, 128, 256, 512, 2147483647]
     elif p.name == 'chronolevels':
       values = [0, 10, 100, 1000, 2147483647]
-    elif p.name == 'definitionticks': 
+    elif p.name == 'definitionticks':
       values = [0, 100, 10000, 1000000, 100000000, 2147483647]
-    elif p.name == 'defragsize': 
+    elif p.name == 'defragsize':
       values = [10, 2048, 262144, 16777216, 2147483647]
-    elif p.name == 'eliminateclslim': 
+    elif p.name == 'eliminateclslim':
       values = [1, 10, 100, 1000, 2147483647]
-    elif p.name == 'eliminaterounds': 
+    elif p.name == 'eliminateocclim':
+      values = [0, 1000, 2000, 4000, 2147483647]
+    elif p.name == 'eliminaterounds':
       values = [1, 2, 4, 8, 16, 32, 10000]
-    elif p.name == 'emafast': 
+    elif p.name == 'emafast':
       values = [10, 20, 33, 40, 50, 100, 1000000]
-    elif p.name == 'emaslow': 
+    elif p.name == 'emaslow':
       values = [100, 50000, 75000, 100000, 125000, 150000, 1000000]
-    elif p.name == 'mineffort': 
+    elif p.name == 'mineffort':
       values = [0, 5, 10, 15, 20, 2147483647]
-    elif p.name == 'minimizedepth': 
+    elif p.name == 'minimizedepth':
       values = [1, 10, 100, 1000, 10000, 1000000]
-    elif p.name == 'modeinit': 
+    elif p.name == 'modeinit':
       values = [10, 100, 1000, 10000, 100000, 100000000]
-    elif p.name == 'reducefraction': 
+    elif p.name == 'reducefraction':
       values = [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100]
-    elif p.name == 'reluctantint': 
+    elif p.name == 'reluctantint':
       values = [2, 256, 512, 1024, 2048, 4096, 32768]
-    elif p.name == 'reluctantlim': 
+    elif p.name == 'reluctantlim':
       values = [0, 65536, 262144, 1048576, 4194304, 16777216, 1073741824]
-    elif p.name == 'restartint': 
+    elif p.name == 'restartint':
       values = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000]
-    elif p.name == 'restartmargin': 
+    elif p.name == 'restartmargin':
       values = [0, 5, 10, 15, 20, 25]
-    elif p.name == 'substituteeffort': 
+    elif p.name == 'substituteeffort':
       values = [1, 2, 4, 10, 16, 32, 64, 1000]
-    elif p.name == 'substituterounds': 
+    elif p.name == 'substituterounds':
       values = [1, 2, 4, 8, 16, 32, 64, 100]
-    elif p.name == 'subsumeclslim': 
+    elif p.name == 'subsumeclslim':
       values = [1, 10, 100, 1000, 10000, 2147483647]
-    elif p.name == 'subsumeocclim': 
+    elif p.name == 'subsumeocclim':
       values = [0, 1, 10, 100, 1000, 10000, 2147483647]
-    elif p.name == 'sweepclauses': 
+    elif p.name == 'sweepclauses':
       values = [0, 256, 512, 1024, 2048, 4096, 2147483647]
-    elif p.name == 'sweepdepth': 
+    elif p.name == 'sweepdepth':
       values = [0, 1, 2, 3, 4, 5, 2147483647]
-    elif p.name == 'sweepeffort': 
+    elif p.name == 'sweepeffort':
       values = [0, 5, 10, 15, 20, 100, 10000]
-    elif p.name == 'sweepfliprounds': 
+    elif p.name == 'sweepfliprounds':
       values = [0, 1, 2, 3, 4, 5, 10, 100, 2147483647]
-    elif p.name == 'sweepmaxclauses': 
+    elif p.name == 'sweepmaxclauses':
       values = [2, 1024, 2048, 4096, 8192, 16384, 2147483647]
-    elif p.name == 'sweepmaxdepth': 
+    elif p.name == 'sweepmaxdepth':
       values = [1, 2, 3, 4, 5, 10, 2147483647]
-    elif p.name == 'sweepvars': 
+    elif p.name == 'sweepvars':
       values = [0, 1, 2, 4, 8, 16, 32, 64, 128]
-    elif p.name == 'tier1': 
+    elif p.name == 'tier1':
       values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100]
-    elif p.name == 'tier2': 
+    elif p.name == 'tier2':
       values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100, 1000]
-    elif p.name == 'vivifytier1': 
+    elif p.name == 'vivifytier1':
       values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100]
-    elif p.name == 'vivifytier2': 
+    elif p.name == 'vivifytier2':
       values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100]
     # If Boolean:
     elif p.left_bound == 0 and p.right_bound == 1:
