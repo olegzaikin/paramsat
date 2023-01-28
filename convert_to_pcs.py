@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.1.3'
+version = '0.1.4'
 
 import sys
 
@@ -63,7 +63,7 @@ parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', 'profile', \
 # reducefraction 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, _75_, 80, 85, 90, 95, 100
 # reluctantint 2, 256, 512, _1024_, 2048, 4096, 32768
 # reluctantlim 0, 65536, 262144, _1048576_, 4194304, 16777216, 1073741824
-# restartint _1_, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000
+# restartint _1_, 2, 5, 10, 25, 50, 100, 1000, 10000
 # restartmargin 0, 5, _10_, 15, 20, 25
 # substituteeffort 1, 2, 4, _10_, 16, 32, 64, 1000
 # substituterounds 1, _2_, 4, 8, 16, 32, 64, 100
@@ -219,7 +219,7 @@ if __name__ == '__main__':
     elif p.name == 'reluctantlim':
       values = [0, 65536, 262144, 1048576, 4194304, 16777216, 1073741824]
     elif p.name == 'restartint':
-      values = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000]
+      values = [1, 2, 5, 10, 25, 50, 100, 1000, 10000]
     elif p.name == 'restartmargin':
       values = [0, 5, 10, 15, 20, 25]
     elif p.name == 'substituteeffort':
