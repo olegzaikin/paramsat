@@ -12,7 +12,7 @@
 #========================================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.4.1'
+version = '0.4.2'
 
 import sys
 import glob
@@ -289,8 +289,8 @@ def calc_obj(solver_name : str, solver_timelim : float, cnfs : list, \
   sat = -1
   # Calculate PAR10 for the solver runtimes: sum(time if solved in lim seconds,
   # otherwise lim*10)
-  for cnf_file_name in cnfs:
-    sys_str = ''
+  sys_str = ''
+  for cnf_file_name in cnfs:    
     if solver_timelim > 0:
       sys_str = solver_name + ' --time=' + str(math.ceil(solver_timelim)) + ' '
     else:
@@ -334,7 +334,7 @@ def collect_result(res):
   if sat == 1 and par10_time < best_par10_time:
     updates_num += 1
     best_par10_time = par10_time
-    best_point = copy.deepcopy(p)
+    best_point = copy.deepcopy(point)
     best_command = command
     elapsed_time = round(time.time() - start_time, 2)
     print('\nUpdated best PAR10 time : ' + str(best_par10_time))
