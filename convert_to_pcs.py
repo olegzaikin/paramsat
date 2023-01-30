@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.1.4'
+version = '0.1.5'
 
 import sys
 
@@ -33,17 +33,18 @@ import sys
 #   simplify - it enables both probing and elimination, but these
 #   options have their own parameters.
 #   bumpreasons - it almost duplicates bump.
-#   eliminate - false-vale can be reached by eliminate* parameters
-#   definitions - false-vale can be reached by definition* parameters
-#   substitute - false-vale can be reached by substitute* parameters
-#   vivify - false-vale can be reached by vivify* parameters
+#   eliminate - false-value can be reached by eliminate* parameters
+#   definitions - false-value can be reached by definition* parameters
+#   substitute - false-value can be reached by substitute* parameters
+#   vivify - false-value can be reached by vivify* parameters
+#   extract - false-value can be reached by ands, equivalences, ifthenelse.
 parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', 'profile', \
   'backboneeffort', 'bumpreasons', 'eliminateeffort', 'eliminateinit', \
   'eliminateint', 'forwardeffort', 'incremental', 'probeinit', 'probeint', \
   'reduceinit', 'reduceint', 'rephaseinit', 'rephaseint', 'simplify', \
   'sweepeffort', 'vivifyeffort', 'vivifyirred', 'walkeffort', 'walkinitially', \
   'bump', 'compact', 'minimize', 'chrono', 'backbonemaxrounds', 'sweep', \
-  'sweepmaxvars', 'eliminate', 'definitions', 'substitute', 'vivify']
+  'sweepmaxvars', 'eliminate', 'definitions', 'substitute', 'vivify', 'extract']
 
 # The following parameters values are chosen manually, here _*_ means default:
 # backbonerounds 1, 10, _100_, 1000
