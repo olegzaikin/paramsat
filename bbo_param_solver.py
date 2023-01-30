@@ -12,7 +12,7 @@
 #========================================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.4.2'
+version = '0.4.3'
 
 import sys
 import glob
@@ -24,6 +24,8 @@ import math
 import statistics
 import string
 import multiprocessing as mp
+
+MIN_BEST_COEF = 1.01
 
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-folder [Options]')
@@ -118,7 +120,7 @@ def read_pcs(param_file_name : str):
 
 # Parse CDCL solver's log:
 def parse_cdcl_time(o):
-	t = -1
+	t = -1.0
 	sat = -1
 	refuted_leaves = -1
 	lines = o.split('\n')
@@ -133,12 +135,6 @@ def parse_cdcl_time(o):
                   sat = 1
 	assert(t > 0)
 	return t, sat
-
-# Kill a solver:
-def kill_solver(solver : str):
-  print("Killing solver " + solver)
-  sys_str = 'killall -9 ' + solver.replace('./','')
-  o = os.popen(sys_str).read()
 
 # Create a copy of a given solver to kill the latter safely:
 def create_solver_copy(solver_name : str, random_str : str):
@@ -284,13 +280,13 @@ def calc_obj(solver_name : str, solver_timelim : float, cnfs : list, \
   assert(len(params) > 1)
   assert(len(params) == len(point))
   assert(len(cnfs) > 0)
-  par10_time = 0
+  par10_time = 0.0
   max_time = -1
   sat = -1
   # Calculate PAR10 for the solver runtimes: sum(time if solved in lim seconds,
   # otherwise lim*10)
   sys_str = ''
-  for cnf_file_name in cnfs:    
+  for cnf_file_name in cnfs:
     if solver_timelim > 0:
       sys_str = solver_name + ' --time=' + str(math.ceil(solver_timelim)) + ' '
     else:
@@ -302,12 +298,13 @@ def calc_obj(solver_name : str, solver_timelim : float, cnfs : list, \
     t, sat = parse_cdcl_time(o)
     print('Time : ' + str(t))
     assert(t > 0)
-    if solver_timelim > 0 and t >= solver_timelim:
+    if sat == -1 or (solver_timelim > 0 and t >= solver_timelim):
       par10_time += solver_timelim * 10
     else:
+      # Only if a CNF is solved in time limit:
       par10_time += t
       max_time = t if max_time < t else max_time
-
+  #print('PAR10 in calc_obj : ' + str(par10_time))
   return point, par10_time, max_time, sat, sys_str
 
 # Collect a result produxed by solver:
@@ -327,11 +324,10 @@ def collect_result(res):
   max_time = res[2]
   sat = res[3]
   command = res[4]
-  print('PAR10 time : ' + str(par10_time) + ' seconds')
+  print('PAR10 time in collect_result : ' + str(par10_time) + ' seconds')
   print('max_time : ' + str(max_time) + ' seconds')
-  processed_points_num += 1
-  print(str(processed_points_num) + ' points processed')
-  if sat == 1 and par10_time < best_par10_time:
+  # Slighly better (< 1%) time might be because of CPU, so use a coefficent:
+  if sat == 1 and par10_time*MIN_BEST_COEF < best_par10_time:
     updates_num += 1
     best_par10_time = par10_time
     best_point = copy.deepcopy(point)
@@ -340,7 +336,7 @@ def collect_result(res):
     print('\nUpdated best PAR10 time : ' + str(best_par10_time))
     if max_time < best_solver_timelim:
       best_solver_timelim = max_time
-      print('Updated best solver max time : ' + str(best_solver_timelim))
+      print('New best solver max time : ' + str(best_solver_timelim))
     print('elapsed : ' + str(elapsed_time) + ' seconds')
     print(points_diff(def_point, best_point, params))
     print(best_command + '\n')
@@ -455,8 +451,10 @@ if __name__ == '__main__':
       time.sleep(2)                       # wait.
     # Here at least 1 task is completed. It might be because of the best
     # time's update or because the time limit is reached. Anyway, kill all
-    # remaining cpunum-1 solver's runs.   
-    kill_solver(solver_name)
+    # remaining cpunum-1 solver's runs.
+    processed_points_num += len(new_points)
+    print(str(processed_points_num) + ' points processed')
+    pool.terminate()
     pool.close()
     pool.join()
     if processed_points_num >= op.max_points:
