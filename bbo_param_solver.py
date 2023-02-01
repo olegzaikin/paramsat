@@ -12,7 +12,7 @@
 #========================================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.4.3'
+version = '0.4.4'
 
 import sys
 import glob
@@ -135,6 +135,16 @@ def parse_cdcl_time(o):
                   sat = 1
 	assert(t > 0)
 	return t, sat
+
+# Kill a solver:
+def kill_solver(solver : str, num : int):
+  assert(solver != '')
+  assert(num >= 1)
+  print('Killing solver ' + solver + ' ' + str(num) + ' times')
+  sys_str = 'killall -9 ' + solver.replace('./','')
+  for _ in range(num):
+    o = os.popen(sys_str).read()
+    time.sleep(1)
 
 # Create a copy of a given solver to kill the latter safely:
 def create_solver_copy(solver_name : str, random_str : str):
@@ -454,7 +464,7 @@ if __name__ == '__main__':
     # remaining cpunum-1 solver's runs.
     processed_points_num += len(new_points)
     print(str(processed_points_num) + ' points processed')
-    pool.terminate()
+    kill_solver(solver_name, len(cnfs))
     pool.close()
     pool.join()
     if processed_points_num >= op.max_points:
