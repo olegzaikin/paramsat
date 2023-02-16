@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.1.5'
+version = '0.1.6'
 
 import sys
 
@@ -82,6 +82,13 @@ parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', 'profile', \
 # vivifytier1 1, 2, _3_, 4, 5, 6, 7, 8, 9, 10, 100
 # vivifytier2 1, 2, 3, 4, 5, _6_, 7, 8, 9, 10, 100
 
+# Parameters which are worth varying for steel-CNFs:
+steel_params = ['backbonerounds', 'bumpreasonslimit', 'bumpreasonsrate', 'definitionticks',\
+  'defraglim', 'defragsize', 'eliminatebound', 'emafast', 'emaslow', 'mineffort',\
+  'minimizedepth', 'reluctantint', 'reluctantlim', 'restartint', 'restartmargin',\
+  'stable', 'subsumeclslim', 'subsumeocclim', 'sweepfliprounds', 'sweepmaxclauses',\
+  'sweepmaxdepth', 'sweepvars', 'target', 'tier2', 'tumble', 'vivifytier1', 'vivifytier2']
+
 class Param:
   name = ''
   left_bound = -1
@@ -97,8 +104,9 @@ def if_parameter_str(s : str, substr : str):
     return True
   return False
 
-# Read SAT solver's parameters:
-def read_solver_parameters(param_file_name : str):
+# Read SAT solver's parameters.
+# If isSteel is True, then a reduced parameters space is constructed.
+def read_solver_parameters(param_file_name : str, isSteel : bool):
   params = []
   with open(param_file_name, 'r') as param_file:
     lines = param_file.read().splitlines()
@@ -149,6 +157,9 @@ def read_solver_parameters(param_file_name : str):
       assert(isinstance(p.default, int))
       assert(p.left_bound < p.right_bound)
       assert(p.right_bound > 0)
+      if isSteel == True and p.name not in steel_params:
+        print('Skip non-steel parameter')
+        continue
       params.append(p)
   assert(len(params) > 0)
   return params
@@ -170,13 +181,22 @@ def domain_to_str(name : str, default : int, values : list):
   s += '}[' + str(default) + ']'
   return s
 
+def print_usage():
+  print('Usage : ' + script_name + ' solver-parameters [Options]')
+  print('  Options :\n' +\
+  '  --steel - reduced parameters space for the steel problems.' + '\n')
+
 if __name__ == '__main__':
 
   if len(sys.argv) == 1:
-    sys.exit('Usage : ' + script_name + ' solver-parameters-file')
+    print_usage()
+    exit(1)
 
   param_file_name = sys.argv[1]
-  params = read_solver_parameters(param_file_name)
+  isSteel = False
+  if len(sys.argv) > 2 and sys.argv[2] == '--steel':
+    isSteel = True
+  params = read_solver_parameters(param_file_name, isSteel)
   #print(str(len(params)) + ' params')
 
   values_num = 0
