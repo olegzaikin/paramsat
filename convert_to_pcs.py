@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.1.6'
+version = '0.1.7'
 
 import sys
 
@@ -181,27 +181,9 @@ def domain_to_str(name : str, default : int, values : list):
   s += '}[' + str(default) + ']'
   return s
 
-def print_usage():
-  print('Usage : ' + script_name + ' solver-parameters [Options]')
-  print('  Options :\n' +\
-  '  --steel - reduced parameters space for the steel problems.' + '\n')
-
-if __name__ == '__main__':
-
-  if len(sys.argv) == 1:
-    print_usage()
-    exit(1)
-
-  param_file_name = sys.argv[1]
-  isSteel = False
-  if len(sys.argv) > 2 and sys.argv[2] == '--steel':
-    isSteel = True
-  params = read_solver_parameters(param_file_name, isSteel)
-  #print(str(len(params)) + ' params')
-
-  values_num = 0
-
+def set_values(params : list):
   # Convert each parameter to the PCS format:
+  values_num = 0
   pcs_str = ''
   for p in params:
     # Manually chosen values:
@@ -301,9 +283,30 @@ if __name__ == '__main__':
     pcs_str += domain_to_str(p.name, p.default, values)
     pcs_str += '\n'
     values_num += len(values)
+  # end of for p in params:
+  return values_num, pcs_str
 
-  print('')
-  print(str(values_num) + ' values in ' + str(len(params)) + ' domains')
+def print_usage():
+  print('Usage : ' + script_name + ' solver-parameters [Options]')
+  print('  Options :\n' +\
+  '  --steel - reduced parameters space for the steel problems.' + '\n')
+
+if __name__ == '__main__':
+
+  if len(sys.argv) == 1:
+    print_usage()
+    exit(1)
+
+  param_file_name = sys.argv[1]
+  isSteel = False
+  if len(sys.argv) > 2 and sys.argv[2] == '--steel':
+    isSteel = True
+  params = read_solver_parameters(param_file_name, isSteel)
+  #print(str(len(params)) + ' params')
+
+  values_num, pcs_str = set_values(params)
+
+  print('\n ' + str(values_num) + ' values in ' + str(len(params)) + ' domains')
 
   # Report results:
   pcs_file_name = param_file_name + '.pcs'
