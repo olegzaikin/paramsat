@@ -12,7 +12,7 @@
 #========================================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.4.4'
+version = '0.4.5'
 
 import sys
 import glob
@@ -221,18 +221,6 @@ def possibcomb(new_point : list, def_point : list, params : list):
         return False
   return True
 
-# Test detection of possible combinations of parameters' values:
-def test_possibcomb(def_point : list, params : list):
-  new_point = copy.deepcopy(def_point)
-  new_point[1] = 0 # backbone
-  new_point[2] = 100 # default
-  new_point2 = copy.deepcopy(def_point)
-  new_point2[1] = 0 # backbone
-  new_point2[2] = 1
-  assert(possibcomb(def_point, def_point, params) == True)
-  assert(possibcomb(new_point, def_point, params) == True)
-  assert(possibcomb(new_point2, def_point, params) == False)
-
 # Generate new points via (1+1)-EA:
 def oneplusone(point : list, params : list, points_num : int):
   global random
@@ -417,9 +405,6 @@ if __name__ == '__main__':
   print(str(len(cnfs)) + ' CNFs were read :')
   for cnf in cnfs:
     print(cnf)
-
-  # Test:
-  test_possibcomb(def_point, params)
 
   best_par10_time = -1
   best_solver_timelim = op.solver_timelim
