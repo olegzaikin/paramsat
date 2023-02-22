@@ -12,7 +12,7 @@
 #========================================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.4.5'
+version = '0.4.6'
 
 import sys
 import glob
@@ -25,7 +25,7 @@ import statistics
 import string
 import multiprocessing as mp
 
-MIN_BEST_COEF = 1.01
+MIN_BEST_COEF = 1.005
 
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-folder [Options]')
