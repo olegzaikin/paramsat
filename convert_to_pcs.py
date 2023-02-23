@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.1.7'
+version = '0.1.8'
 
 import sys
 
@@ -82,8 +82,8 @@ parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', 'profile', \
 # vivifytier1 1, 2, _3_, 4, 5, 6, 7, 8, 9, 10, 100
 # vivifytier2 1, 2, 3, 4, 5, _6_, 7, 8, 9, 10, 100
 
-# Parameters which are worth varying for steel-CNFs:
-steel_params = ['backbonerounds', 'bumpreasonslimit', 'bumpreasonsrate', 'definitionticks',\
+# Parameters which are worth varying for still-CNFs:
+still_params = ['backbonerounds', 'bumpreasonslimit', 'bumpreasonsrate', 'definitionticks',\
   'defraglim', 'defragsize', 'eliminatebound', 'emafast', 'emaslow', 'mineffort',\
   'minimizedepth', 'reluctantint', 'reluctantlim', 'restartint', 'restartmargin',\
   'stable', 'subsumeclslim', 'subsumeocclim', 'sweepfliprounds', 'sweepmaxclauses',\
@@ -105,8 +105,8 @@ def if_parameter_str(s : str, substr : str):
   return False
 
 # Read SAT solver's parameters.
-# If isSteel is True, then a reduced parameters space is constructed.
-def read_solver_parameters(param_file_name : str, isSteel : bool):
+# If isStill is True, then a reduced parameters space is constructed.
+def read_solver_parameters(param_file_name : str, isStill : bool):
   params = []
   with open(param_file_name, 'r') as param_file:
     lines = param_file.read().splitlines()
@@ -157,8 +157,8 @@ def read_solver_parameters(param_file_name : str, isSteel : bool):
       assert(isinstance(p.default, int))
       assert(p.left_bound < p.right_bound)
       assert(p.right_bound > 0)
-      if isSteel == True and p.name not in steel_params:
-        print('Skip non-steel parameter')
+      if isStill == True and p.name not in still_params:
+        print('Skip non-still parameter')
         continue
       params.append(p)
   assert(len(params) > 0)
@@ -289,7 +289,7 @@ def set_values(params : list):
 def print_usage():
   print('Usage : ' + script_name + ' solver-parameters [Options]')
   print('  Options :\n' +\
-  '  --steel - reduced parameters space for the steel problems.' + '\n')
+  '  --still - reduced parameters space for the still problems.' + '\n')
 
 if __name__ == '__main__':
 
@@ -298,10 +298,10 @@ if __name__ == '__main__':
     exit(1)
 
   param_file_name = sys.argv[1]
-  isSteel = False
-  if len(sys.argv) > 2 and sys.argv[2] == '--steel':
-    isSteel = True
-  params = read_solver_parameters(param_file_name, isSteel)
+  isStill = False
+  if len(sys.argv) > 2 and sys.argv[2] == '--still':
+    isStill = True
+  params = read_solver_parameters(param_file_name, isStill)
   #print(str(len(params)) + ' params')
 
   values_num, pcs_str = set_values(params)
