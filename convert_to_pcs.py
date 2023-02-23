@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.1.8'
+version = '0.1.9'
 
 import sys
 
@@ -89,6 +89,12 @@ still_params = ['backbonerounds', 'bumpreasonslimit', 'bumpreasonsrate', 'defini
   'stable', 'subsumeclslim', 'subsumeocclim', 'sweepfliprounds', 'sweepmaxclauses',\
   'sweepmaxdepth', 'sweepvars', 'target', 'tier2', 'tumble', 'vivifytier1', 'vivifytier2']
 
+#
+
+dm_params = ['backbone', 'definitioncores', 'eliminatebound', 'emafast', 'mineffort',\
+  'minimizedepth', 'modeinit', 'otfs', 'stable', 'substituterounds', 'subsumeclslim',\
+  'sweepclauses', 'sweepmaxclauses', 'sweepmaxdepth', 'sweepvars']
+
 class Param:
   name = ''
   left_bound = -1
@@ -106,7 +112,7 @@ def if_parameter_str(s : str, substr : str):
 
 # Read SAT solver's parameters.
 # If isStill is True, then a reduced parameters space is constructed.
-def read_solver_parameters(param_file_name : str, isStill : bool):
+def read_solver_parameters(param_file_name : str, isStill : bool, isDm : bool):
   params = []
   with open(param_file_name, 'r') as param_file:
     lines = param_file.read().splitlines()
@@ -159,6 +165,9 @@ def read_solver_parameters(param_file_name : str, isStill : bool):
       assert(p.right_bound > 0)
       if isStill == True and p.name not in still_params:
         print('Skip non-still parameter')
+        continue
+      if isDm == True and p.name not in dm_params:
+        print('Skip non-dm parameter')
         continue
       params.append(p)
   assert(len(params) > 0)
@@ -289,7 +298,9 @@ def set_values(params : list):
 def print_usage():
   print('Usage : ' + script_name + ' solver-parameters [Options]')
   print('  Options :\n' +\
-  '  --still - reduced parameters space for the still problems.' + '\n')
+  '  --still - reduced parameters space for the still problems.' + '\n' +\
+  '  --dm    - reduced parameters space for the dm problems.' + '\n')
+
 
 if __name__ == '__main__':
 
@@ -299,9 +310,13 @@ if __name__ == '__main__':
 
   param_file_name = sys.argv[1]
   isStill = False
+  isDm = False
   if len(sys.argv) > 2 and sys.argv[2] == '--still':
     isStill = True
-  params = read_solver_parameters(param_file_name, isStill)
+  elif len(sys.argv) > 2 and sys.argv[2] == '--dm':
+    isDm = True
+  assert(not isStill or not isDm)
+  params = read_solver_parameters(param_file_name, isStill, isDm)
   #print(str(len(params)) + ' params')
 
   values_num, pcs_str = set_values(params)
