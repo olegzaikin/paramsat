@@ -12,7 +12,7 @@
 #========================================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.4.6'
+version = '0.4.7'
 
 import sys
 import glob
@@ -189,7 +189,7 @@ def possibcomb(new_point : list, def_point : list, params : list):
   for i in range(len(params)):
     parind[params[i].name] = i
   # backbone:
-  if 'backbone' in parind and new_point[parind['backbone']] == 0:
+  if 'backbone' in params and 'backbonerounds' in params and 'backbone' in parind and new_point[parind['backbone']] == 0:
     lst = ['backbonerounds']
     for name in lst:
       if not equalparamval(name, new_point, def_point, parind):
