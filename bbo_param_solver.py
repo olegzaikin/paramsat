@@ -12,7 +12,7 @@
 #========================================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.4.7'
+version = '0.4.8'
 
 import sys
 import glob
@@ -189,15 +189,19 @@ def possibcomb(new_point : list, def_point : list, params : list):
   for i in range(len(params)):
     parind[params[i].name] = i
   # backbone:
-  if 'backbone' in params and 'backbonerounds' in params and 'backbone' in parind and new_point[parind['backbone']] == 0:
+  if 'backbone' in parind and new_point[parind['backbone']] == 0:
     lst = ['backbonerounds']
     for name in lst:
+      if name not in parind:
+        continue
       if not equalparamval(name, new_point, def_point, parind):
         return False
   # definitions:
   if 'definitions' in parind and new_point[parind['definitions']] == 'false':
     lst = ['definitioncores', 'definitionticks']
     for name in lst:
+      if name not in parind:
+        continue
       if not equalparamval(name, new_point, def_point, parind):
         return False
   # eliminate:
@@ -205,18 +209,24 @@ def possibcomb(new_point : list, def_point : list, params : list):
     lst = ['eliminatebound', 'eliminateclslim', 'eliminateocclim', \
       'eliminaterounds', 'forward']
     for name in lst:
+      if name not in parind:
+        continue
       if not equalparamval(name, new_point, def_point, parind):
         return False
   # substitute:
   if 'substitute' in parind and new_point[parind['substitute']] == 'false':
     lst = ['substituteeffort', 'substituterounds']
     for name in lst:
+      if name not in parind:
+        continue
       if not equalparamval(name, new_point, def_point, parind):
         return False
   # vivify:
   if 'vivify' in parind and new_point[parind['vivify']] == 'false':
     lst = ['vivifytier1', 'vivifytier2']
     for name in lst:
+      if name not in parind:
+        continue
       if not equalparamval(name, new_point, def_point, parind):
         return False
   return True
