@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.1.9'
+version = '0.1.10'
 
 import sys
 
@@ -83,10 +83,10 @@ parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', 'profile', \
 # vivifytier2 1, 2, 3, 4, 5, _6_, 7, 8, 9, 10, 100
 
 # Parameters which are worth varying for still-CNFs:
-still_params = ['backbonerounds', 'bumpreasonslimit', 'bumpreasonsrate', 'definitionticks',\
-  'defraglim', 'defragsize', 'eliminatebound', 'emafast', 'emaslow', 'mineffort',\
+still_params = ['backbone', 'backbonerounds', 'bumpreasonslimit', 'bumpreasonsrate', 'definitionticks',\
+  'defraglim', 'defragsize', 'eliminatebound', 'eliminateclslim', 'emafast', 'emaslow', 'mineffort',\
   'minimizedepth', 'reluctantint', 'reluctantlim', 'restartint', 'restartmargin',\
-  'stable', 'subsumeclslim', 'subsumeocclim', 'sweepfliprounds', 'sweepmaxclauses',\
+  'stable', 'substituteeffort', 'subsumeclslim', 'subsumeocclim', 'sweepfliprounds', 'sweepmaxclauses',\
   'sweepmaxdepth', 'sweepvars', 'target', 'tier2', 'tumble', 'vivifytier1', 'vivifytier2']
 
 #
