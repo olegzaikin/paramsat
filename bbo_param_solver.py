@@ -9,10 +9,15 @@
 #
 # Example:
 #   python3 ./bbo_param_solver.py ./kissat3 ./kissat3.pcs ./cnfs/ -seed=1 -cpunum=2
+# 
+# By default the script works in the estimating mode, where new points are generated
+# and processed until a stopping criterion is reached.
+# In the solving mode, cpu_num points are generated and processed until on any of them
+# a solution is found.
 #========================================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.4.8'
+version = '0.5.0'
 
 import sys
 import glob
@@ -30,11 +35,12 @@ MIN_BEST_COEF = 1.005
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-folder [Options]')
   print('  Options :\n' +\
-  '-defobj=<float>        - (default : -1)   objective funtion value for the default point' + '\n' +\
-  '-solvertimelim=<float> - (default : -1)   time limit in seconds on solver' + '\n' +\
-  '-maxpoints=<int>       - (default : 1000) maximum number of points to process' + '\n' +\
-  '-cpunum=<int>          - (default : 1)    number of used CPU cores' + '\n' +\
-  '-seed=<int>            - (default : time) seed for pseudorandom generator' + '\n')
+  '  -defobj=<float>        - (default : -1)   objective funtion value for the default point' + '\n' +\
+  '  -solvertimelim=<float> - (default : -1)   time limit in seconds on solver' + '\n' +\
+  '  -maxpoints=<int>       - (default : 1000) maximum number of points to process' + '\n' +\
+  '  -cpunum=<int>          - (default : 1)    number of used CPU cores' + '\n' +\
+  '  -seed=<int>            - (default : time) seed for pseudorandom generator' + '\n' +\
+  '  --solving              - (default : off)  solving mode' + '\n')
 
 # Input options:
 class Options:
@@ -43,18 +49,21 @@ class Options:
 	max_points = 1000
 	cpu_num = 1
 	seed = 0
+	is_solving = False
 	def __init__(self):
 		self.def_point_time = -1
 		self.solvertimelim = -1
 		self.max_points = 1000
 		self.cpu_num = 1
 		self.seed = round(time.time() * 1000)
+		self.is_solving = False
 	def __str__(self):
 		s = 'def_point_time  : ' + str(self.def_point_time) + '\n' +\
         'solver_timelim  : ' + str(self.solver_timelim) + '\n' +\
         'max_points      : ' + str(self.max_points) + '\n' +\
         'cpu_num         : ' + str(self.cpu_num) + '\n' +\
-		    'seed            : ' + str(self.seed) + '\n'
+		    'seed            : ' + str(self.seed) + '\n' +\
+		    'is_solving      : ' + str(self.is_solving)
 		return s
 	def read(self, argv) :
 		for p in argv:
@@ -68,6 +77,9 @@ class Options:
 				self.cpu_num = int(p.split('-cpunum=')[1])
 			if '-seed=' in p:
 				self.seed = int(p.split('-seed=')[1])
+			if p == '--solving':
+				self.is_solving = True
+		assert((self.def_point_time > 0 and self.solver_timelim > 0) or (self.def_point_time == -1 and self.solver_timelim == -1))
 
 # Solver's parameter:
 class Param:
@@ -293,8 +305,8 @@ def calc_obj(solver_name : str, solver_timelim : float, cnfs : list, \
   sat = -1
   # Calculate PAR10 for the solver runtimes: sum(time if solved in lim seconds,
   # otherwise lim*10)
-  sys_str = ''
   for cnf_file_name in cnfs:
+    sys_str = ''
     if solver_timelim > 0:
       sys_str = solver_name + ' --time=' + str(math.ceil(solver_timelim)) + ' '
     else:
@@ -302,6 +314,7 @@ def calc_obj(solver_name : str, solver_timelim : float, cnfs : list, \
     for i in range(len(params)):
       sys_str += '--' + params[i].name + '=' + str(point[i]) + ' '
     sys_str += cnf_file_name
+    #print(sys_str)
     o = os.popen(sys_str).read()
     t, sat = parse_cdcl_time(o)
     print('Time : ' + str(t))
@@ -312,6 +325,7 @@ def calc_obj(solver_name : str, solver_timelim : float, cnfs : list, \
       # Only if a CNF is solved in time limit:
       par10_time += t
       max_time = t if max_time < t else max_time
+    print(sys_str)
   #print('PAR10 in calc_obj : ' + str(par10_time))
   return point, par10_time, max_time, sat, sys_str
 
@@ -366,6 +380,8 @@ def strlistrepr(lst : list):
   s += str(lst[-1])
   return s
 
+
+# Main function:
 if __name__ == '__main__':
   if len(sys.argv) < 4:
     print_usage()
@@ -416,37 +432,45 @@ if __name__ == '__main__':
   for cnf in cnfs:
     print(cnf)
 
-  best_par10_time = -1
-  best_solver_timelim = op.solver_timelim
-
-  command = ''
-  if op.def_point_time > 0:
-    best_par10_time = op.def_point_time
-  else:
-    p, best_par10_time, best_solver_timelim, sat, command = calc_obj(solver_name, -1, cnfs, params, def_point)
-    assert(sat == 1)
-    assert(p == def_point)
+  # Here best_solver_timelim is the runtime on default point
+  best_solver_timelim = op.solver_timelim 
+  best_par10_time = op.def_point_time
+  default_par10_time = op.def_point_time
   print('Current best PAR10 time : ' + str(best_par10_time))
   print('Current best solver time limit : ' + str(best_solver_timelim))
-  if command != '':
-    print(command + '\n')
 
   elapsed_time = round(time.time() - start_time, 2)
-  print('elapsed : ' + str(elapsed_time) + ' seconds')
+  print('Elapsed : ' + str(elapsed_time) + ' seconds')
 
+  processed_points_num = 0
   generated_points = set()
-  generated_points.add(strlistrepr(def_point))
-  processed_points_num = 1 # the default point is processed
-  runtime_def_point = best_par10_time
+  # In runtime of default point is given, mark it as generated and processed:
+  if best_solver_timelim > 0:
+    processed_points_num = 1 # the default point is processed
+    generated_points.add(strlistrepr(def_point))
+    assert(len(generated_points) == 1)
+    assert(best_solver_timelim > 0)
+    assert(default_par10_time > 0)
   best_point = copy.deepcopy(def_point)
-  best_command = command
+  # Command for default point:
+  best_command = solver_name + ' ' + cnfs[0]
   skipped_repeat_num = 0
   skipped_impos_num = 0
   updates_num = 0
+  iter = 0
 
   while True:
-    # Generate 1 point for each CPU core:
-    new_points = oneplusone(best_point, params, op.cpu_num)
+    # If default point's runtime is not given: 
+    if best_solver_timelim == -1:
+      assert(iter == 0)
+      new_points = [best_point]
+      gen_points = oneplusone(best_point, params, op.cpu_num - 1)
+      for p in gen_points:
+        new_points.append(copy.deepcopy(p))
+      print('Runtime for default point is not given, process it.')
+    else:
+      new_points = oneplusone(best_point, params, op.cpu_num)
+    # Run 1 point on each CPU core:
     assert(len(new_points) == op.cpu_num)
     # Process all points in parallel:
     pool = mp.Pool(op.cpu_num)
@@ -462,19 +486,25 @@ if __name__ == '__main__':
     kill_solver(solver_name, len(cnfs))
     pool.close()
     pool.join()
+    iter += 1
     if processed_points_num >= op.max_points:
       print('The limit on the number of points is reached, break.')
       break
+    if op.is_solving:
+      # Only 1 iteration in the solving mode:
+      assert(iter == 1)
+      break
 
   elapsed_time = round(time.time() - start_time, 2)
-  print('\nelapsed : ' + str(elapsed_time) + ' seconds')
+  print('\nElapsed : ' + str(elapsed_time) + ' seconds')
+  print(str(iter) + ' iterations')
   print(str(updates_num) + " updates of best point")
   print(str(skipped_repeat_num + skipped_impos_num) + ' skipped points, of them:')
   print('  ' + str(skipped_repeat_num ) + ' repeated points')
   print('  ' + str(skipped_impos_num) + ' impossible-combination points')
   print(str(processed_points_num) + ' processed points')
   print('Final best PAR10 time : ' + str(best_par10_time) + ' , so ' + \
-    str(runtime_def_point) + ' -> ' + str(best_par10_time))
+    str(default_par10_time) + ' -> ' + str(best_par10_time))
   if updates_num > 0:
     print(points_diff(def_point, best_point, params))
   print('Final best command : \n' + best_command)

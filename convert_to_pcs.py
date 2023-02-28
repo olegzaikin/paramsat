@@ -48,7 +48,6 @@ parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', 'profile', \
 
 # The following parameters values are chosen manually, here _*_ means default:
 # backbonerounds 1, 10, _100_, 1000
-# bumpreasonsrate 1, 2, 4, 8, _10_, 16, 32, 64, 128, 256, 512, 2147483647
 # bumpreasonslimit 1, 2, 4, 8, _10_, 16, 32, 64, 128, 256, 512, 2147483647
 # chronolevels 0, 10, _100_, 1000, 2147483647
 # definitionticks 0, 100, 10000, _1000000_, 100000000, 2147483647
