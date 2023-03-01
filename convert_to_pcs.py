@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.1.10'
+version = '0.1.11'
 
 import sys
 
@@ -89,10 +89,9 @@ still_params = ['backbone', 'backbonerounds', 'bumpreasonslimit', 'bumpreasonsra
   'sweepmaxdepth', 'sweepvars', 'target', 'tier2', 'tumble', 'vivifytier1', 'vivifytier2']
 
 #
-
 dm_params = ['backbone', 'definitioncores', 'eliminatebound', 'emafast', 'mineffort',\
-  'minimizedepth', 'modeinit', 'otfs', 'stable', 'substituterounds', 'subsumeclslim',\
-  'sweepclauses', 'sweepmaxclauses', 'sweepmaxdepth', 'sweepvars']
+  'minimizedepth', 'modeinit', 'otfs', 'restartint', 'stable', 'substituterounds', 'subsumeclslim',\
+  'sweepclauses', 'sweepmaxclauses', 'sweepmaxdepth', 'sweepvars', 'target']
 
 class Param:
   name = ''
