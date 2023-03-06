@@ -17,7 +17,7 @@
 #========================================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.5.1'
+version = '0.5.2'
 
 import sys
 import glob
@@ -31,7 +31,6 @@ import string
 import multiprocessing as mp
 
 MIN_BEST_COEF = 1.005
-GENERATED_POINTS_FILE_NAME = 'generated'
 
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-folder [Options]')
@@ -370,8 +369,9 @@ def collect_result(res):
 def read_cnfs(cnfs_folder_name : str):
   cnfs = list()
   os.chdir('.')
-  for file in glob.glob(cnfs_folder_name + '/*.cnf'):
-    cnfs.append(file)
+  for f in glob.glob(cnfs_folder_name + '/*.cnf'):
+    assert('.cnf' in f)
+    cnfs.append(f)
   return cnfs
 
 # String-representation of a given point:
@@ -384,8 +384,16 @@ def strlistrepr(lst : list):
   return s
 
 # Writed generated points for a file:
-def write_points(points : list):
-  with open(GENERATED_POINTS_FILE_NAME, 'w') as f:
+def write_points(points : list, cnfs : list):
+  out_name = 'generated_'
+  cleared_cnfs = []
+  for x in cnfs:
+    assert('.cnf' in x)
+    out_name += os.path.basename(x.split('.cnf')[0])
+    if x != cnfs[-1]:
+      out_name += '_'
+  print('Writing generated points to file ' + out_name)
+  with open(out_name, 'w') as f:
     for p in points:
       f.write(str(p))
       f.write('\n')
@@ -531,7 +539,7 @@ if __name__ == '__main__':
     assert(best_par10_time > 0)
     iter += 1
     # Write generated points:
-    write_points(generated_points)
+    write_points(generated_points, cnfs)
     #
     if processed_points_num >= op.max_points:
       print('The limit on the number of points is reached, break.')

@@ -5,4 +5,4 @@ range
 *.pcs
 out*
 kissat3*
-generated
+generated*
