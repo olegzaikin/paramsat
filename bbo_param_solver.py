@@ -15,6 +15,11 @@
 # In the solving mode, cpu_num points are generated and processed until on any of them
 # a solution is found.
 #========================================================================================
+#
+# TODOs:
+# 1. Extend to unsatisfiable CNFs.
+# 2. Generate a parallel list of tasks.
+
 
 script_name = "bbo_param_solver.py"
 version = '0.5.2'
@@ -331,7 +336,7 @@ def calc_obj(solver_name : str, solver_timelim : float, cnfs : list, \
   #print('PAR10 in calc_obj : ' + str(par10_time))
   return point, par10_time, max_time, sat, sys_str
 
-# Collect a result produxed by solver:
+# Collect a result produced by solver:
 def collect_result(res):
   global updates_num
   global best_par10_time
