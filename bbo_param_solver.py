@@ -22,7 +22,7 @@
 
 
 script_name = "bbo_param_solver.py"
-version = '0.5.2'
+version = '0.5.3'
 
 import sys
 import glob
@@ -33,6 +33,7 @@ import copy
 import math
 import statistics
 import string
+from datetime import datetime
 import multiprocessing as mp
 
 MIN_BEST_COEF = 1.005
@@ -136,12 +137,12 @@ def read_pcs(param_file_name : str):
   assert(len(params) > 0)
   return params
 
-# Parse CDCL solver's log:
-def parse_cdcl_time(o):
+# Parse a CDCL solver's log:
+def parse_cdcl_result(cdcl_log : str):
 	t = -1.0
 	sat = -1
 	refuted_leaves = -1
-	lines = o.split('\n')
+	lines = cdcl_log.split('\n')
 	for line in lines:
 		if 'c process-time' in line:
 			words = line.split()
@@ -302,7 +303,7 @@ def points_diff(p1 : list, p2 : list, params : list):
 
 # Run solver on a given point:
 def calc_obj(solver_name : str, solver_timelim : float, cnfs : list, \
-  params : list, point : list):
+  params : list, point : list, is_solving : bool):
   assert(len(params) > 1)
   assert(len(params) == len(point))
   assert(len(cnfs) > 0)
@@ -321,8 +322,8 @@ def calc_obj(solver_name : str, solver_timelim : float, cnfs : list, \
       sys_str += '--' + params[i].name + '=' + str(point[i]) + ' '
     sys_str += cnf_file_name
     #print(sys_str)
-    o = os.popen(sys_str).read()
-    t, sat = parse_cdcl_time(o)
+    cdcl_log = os.popen(sys_str).read()
+    t, sat = parse_cdcl_result(cdcl_log)
     assert(t > 0)
     if sat == -1 or (solver_timelim > 0 and t >= solver_timelim):
       par10_time += solver_timelim * 10
@@ -333,6 +334,16 @@ def calc_obj(solver_name : str, solver_timelim : float, cnfs : list, \
       print('Solved in time limit :')
       print(sys_str)
       print('Time : ' + str(t))
+      # In solving mode, the CDCL solver's log should be saved:
+      if is_solving:
+        assert('.cnf' in cnf_file_name)
+        cdcl_log_file_name = 'log_' + solver_name.replace('./','') + '_' + os.path.basename(cnf_file_name.split('.cnf')[0])
+        now = datetime.now()
+        cdcl_log_file_name += '_' + now.strftime("%d-%m-%Y_%H-%M-%S")
+        print('Writing CDCL solver log to file ' + cdcl_log_file_name)
+        with open(cdcl_log_file_name, 'w') as f:
+          f.write(cdcl_log)
+
   #print('PAR10 in calc_obj : ' + str(par10_time))
   return point, par10_time, max_time, sat, sys_str
 
@@ -529,7 +540,7 @@ if __name__ == '__main__':
     # Process all points in parallel:
     pool = mp.Pool(op.cpu_num)
     for p in new_points:
-      pool.apply_async(calc_obj, args=(solver_name, best_solver_timelim, cnfs, params, p), callback=collect_result)
+      pool.apply_async(calc_obj, args=(solver_name, best_solver_timelim, cnfs, params, p, op.is_solving), callback=collect_result)
     while len(pool._cache) == op.cpu_num: # While all CPU cores are busy,
       time.sleep(2)                       # wait.
     # Here at least 1 task is completed. It might be because of the best
@@ -551,6 +562,7 @@ if __name__ == '__main__':
       break
     if op.is_solving:
       # Only 1 iteration in the solving mode:
+      print('Breaking the main loop because of solving mode')
       assert(iter == 1)
       break
 
