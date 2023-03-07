@@ -22,7 +22,7 @@
 
 
 script_name = "bbo_param_solver.py"
-version = '0.5.3'
+version = '0.5.4'
 
 import sys
 import glob
@@ -44,15 +44,18 @@ def print_usage():
   '  -defobj=<float>        - (default : -1)   objective funtion value for the default point' + '\n' +\
   '  -solvertimelim=<float> - (default : -1)   time limit in seconds on solver' + '\n' +\
   '  -maxpoints=<int>       - (default : 1000) maximum number of points to process' + '\n' +\
+  '  -pointsfile=<string>   - (default : "")   path to a file with points' + '\n' +\
   '  -cpunum=<int>          - (default : 1)    number of used CPU cores' + '\n' +\
   '  -seed=<int>            - (default : time) seed for pseudorandom generator' + '\n' +\
-  '  --solving              - (default : off)  solving mode' + '\n')
+  '  --solving              - (default : off)  solving mode' + '\n\n' +\
+  'Points from the -pointsfile are used along with those which are generated.')
 
 # Input options:
 class Options:
 	def_point_time = -1
 	solver_timelim = -1
 	max_points = 1000
+	points_file = ''
 	cpu_num = 1
 	seed = 0
 	is_solving = False
@@ -60,6 +63,7 @@ class Options:
 		self.def_point_time = -1
 		self.solvertimelim = -1
 		self.max_points = 1000
+		self.points_file = ''
 		self.cpu_num = 1
 		self.seed = round(time.time() * 1000)
 		self.is_solving = False
@@ -67,18 +71,21 @@ class Options:
 		s = 'def_point_time  : ' + str(self.def_point_time) + '\n' +\
         'solver_timelim  : ' + str(self.solver_timelim) + '\n' +\
         'max_points      : ' + str(self.max_points) + '\n' +\
+        'points_file     : ' + str(self.points_file) + '\n' +\
         'cpu_num         : ' + str(self.cpu_num) + '\n' +\
 		    'seed            : ' + str(self.seed) + '\n' +\
 		    'is_solving      : ' + str(self.is_solving)
 		return s
 	def read(self, argv) :
 		for p in argv:
-			if '-defobj' in p:
+			if '-defobj=' in p:
 				self.def_point_time = math.ceil(float(p.split('-defobj=')[1]))
-			if '-solvertimelim' in p:
+			if '-solvertimelim=' in p:
 				self.solver_timelim = math.ceil(float(p.split('-solvertimelim=')[1]))
-			if '-maxpoints' in p:
+			if '-maxpoints=' in p:
 				self.max_points = math.ceil(float(p.split('-maxpoints=')[1]))
+			if '-pointsfile=' in p:
+				self.points_file = p.split('-pointsfile=')[1]
 			if '-cpunum=' in p:
 				self.cpu_num = int(p.split('-cpunum=')[1])
 			if '-seed=' in p:
@@ -331,8 +338,8 @@ def calc_obj(solver_name : str, solver_timelim : float, cnfs : list, \
       # Only if a CNF is solved in time limit:
       par10_time += t
       max_time = t if max_time < t else max_time
-      print('Solved in time limit :')
-      print(sys_str)
+      #print('Solved in time limit :')
+      #print(sys_str)
       print('Time : ' + str(t))
       # In solving mode, the CDCL solver's log should be saved:
       if is_solving:
@@ -399,7 +406,7 @@ def strlistrepr(lst : list):
   s += str(lst[-1])
   return s
 
-# Writed generated points for a file:
+# Writed generated points to a file:
 def write_points(points : list, cnfs : list):
   out_name = 'generated_'
   cleared_cnfs = []
@@ -413,6 +420,23 @@ def write_points(points : list, cnfs : list):
     for p in points:
       f.write(str(p))
       f.write('\n')
+
+# Read points from a text file:
+def read_points(points_file_name : str, def_point : list, paramsdict : dict):
+  if points_file_name == '':
+    return []
+  given_points = []
+  with open(points_file_name, 'r') as points_file:
+    lines = points_file.read().splitlines()
+    for line in lines:
+      words = line.split()
+      point = copy.deepcopy(def_point)
+      for word in words:
+        param_name = word.split('--')[1].split('=')[0]
+        value = word.split('=')[1]
+        point[paramsdict[param_name]] = value
+      given_points.append(point)
+  return given_points
 
 # Main function:
 if __name__ == '__main__':
@@ -479,6 +503,9 @@ if __name__ == '__main__':
   print('UNSAT-params point :')
   print(str(unsat_point) + '\n')
 
+  # Read points which are given in a text file:
+  given_points = read_points(op.points_file, def_point, paramsdict)
+
   cnfs = []
   cnfs = read_cnfs(cnfs_folder_name)
   assert(len(cnfs) > 0)
@@ -525,16 +552,28 @@ if __name__ == '__main__':
         new_points.append(sat_point)
         generated_points.add(strlistrepr(sat_point))
         print('... and SAT-params point')
+        print(sat_point)
       if op.cpu_num > 2:
         new_points.append(unsat_point)
         generated_points.add(strlistrepr(unsat_point))
         print('... and UNSAT-params point')
+        print(unsat_point)
+      if op.cpu_num > 3:
+        for p in given_points:
+          new_points.append(p)
+          generated_points.add(strlistrepr(p))
+          print('... and given point')
+          print(p)
+          if len(new_points) == op.cpu_num:
+            break
+      assert(len(new_points) <= op.cpu_num)
       gen_points = oneplusone(best_point, params, paramsdict, op.cpu_num - len(new_points))
+      print('Generated ' + str(len(gen_points)) + ' points by (1+1)-EA')
       for p in gen_points:
         new_points.append(copy.deepcopy(p))
     else:
-      new_points = oneplusone(best_point, params, paramsdict, op.cpu_num)
-    assert(iter == 0 and len(new_points) == len(generated_points)) or (iter > 0 and len(new_points) < len(generated_points))
+      new_points = oneplusone(best_point, params, paramsdict, op.cpu_num)    
+    assert((iter == 0 and len(new_points) == len(generated_points)) or (iter > 0 and len(new_points) < len(generated_points)))
     # Run 1 point on each CPU core:
     assert(len(new_points) == op.cpu_num)
     # Process all points in parallel:
