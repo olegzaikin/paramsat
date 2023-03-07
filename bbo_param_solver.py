@@ -22,7 +22,7 @@
 
 
 script_name = "bbo_param_solver.py"
-version = '0.5.5'
+version = '0.5.6'
 
 import sys
 import glob
@@ -434,7 +434,7 @@ def read_points(points_file_name : str, def_point : list, paramsdict : dict):
       for word in words:
         param_name = word.split('--')[1].split('=')[0]
         if param_name in paramsdict:
-          value = word.split('=')[1]
+          value = convert_if_int(word.split('=')[1])
           point[paramsdict[param_name]] = value
       assert(len(point) == len(def_point))
       given_points.append(point)
