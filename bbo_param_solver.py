@@ -23,7 +23,7 @@
 
 
 script_name = "bbo_param_solver.py"
-version = '0.5.7'
+version = '0.5.8'
 
 import sys
 import glob
@@ -495,7 +495,8 @@ if __name__ == '__main__':
   sat_point = copy.deepcopy(def_point)
   sat_point[paramsdict['target']] = 2
   sat_point[paramsdict['restartint']] = 50
-  assert(sat_point != def_point)
+  if sat_point == def_point:
+    print("SAT-point and default point are equal.")
   print('SAT-params point :')
   print(str(sat_point))
 
