@@ -23,7 +23,7 @@
 
 
 script_name = "bbo_param_solver.py"
-version = '0.5.8'
+version = '0.5.9'
 
 import sys
 import glob
@@ -503,12 +503,18 @@ if __name__ == '__main__':
   # UNSAT point, i.e. --stable=0:
   unsat_point = copy.deepcopy(def_point)
   unsat_point[paramsdict['stable']] = 0
-  assert(unsat_point != def_point and unsat_point != sat_point)
+  assert(unsat_point != sat_point)
+  if unsat_point == def_point:
+    print("UNSAT-point and default point are equal.")
   print('UNSAT-params point :')
-  print(str(unsat_point) + '\n')
+  print(str(unsat_point))
 
   # Read points which are given in a text file:
   given_points = read_points(op.points_file, def_point, paramsdict)
+  print(str(len(given_points)) + " points are given in a file :")
+  for p in given_points:
+    print(str(p))
+  print('')
 
   cnfs = []
   cnfs = read_cnfs(cnfs_folder_name)
@@ -569,7 +575,6 @@ if __name__ == '__main__':
           new_points.append(p)
           generated_points.add(strlistrepr(p))
           print('... and given point')
-          print(str(p) + '\n')
           if len(new_points) == op.cpu_num:
             break
       assert(len(new_points) <= op.cpu_num)
