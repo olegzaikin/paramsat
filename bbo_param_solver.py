@@ -17,12 +17,13 @@
 #========================================================================================
 #
 # TODOs:
+# 0. Print the final best point as pcs-file.
 # 1. Extend to unsatisfiable CNFs.
 # 2. Generate a parallel list of tasks.
 
 
 script_name = "bbo_param_solver.py"
-version = '0.5.6'
+version = '0.5.7'
 
 import sys
 import glob
@@ -488,7 +489,7 @@ if __name__ == '__main__':
     def_point.append(prm.default)
   assert(len(def_point) == params_num)
   print('Default point :')
-  print(str(def_point) + '\n')
+  print(str(def_point))
 
   # SAT point, i.e. --target=2 --restartint=50:
   sat_point = copy.deepcopy(def_point)
@@ -496,7 +497,7 @@ if __name__ == '__main__':
   sat_point[paramsdict['restartint']] = 50
   assert(sat_point != def_point)
   print('SAT-params point :')
-  print(str(sat_point) + '\n')
+  print(str(sat_point))
 
   # UNSAT point, i.e. --stable=0:
   unsat_point = copy.deepcopy(def_point)
@@ -550,22 +551,24 @@ if __name__ == '__main__':
       print('Runtime for default point is not given, process it.')
       new_points = [copy.deepcopy(def_point)]
       generated_points.add(strlistrepr(def_point))
-      if op.cpu_num > 1:
+      if op.cpu_num > 1 and strlistrepr(sat_point) not in generated_points:
         new_points.append(sat_point)
         generated_points.add(strlistrepr(sat_point))
         print('... and SAT-params point')
-        print(sat_point)
-      if op.cpu_num > 2:
+      if op.cpu_num > 2 and strlistrepr(unsat_point) not in generated_points:
         new_points.append(unsat_point)
         generated_points.add(strlistrepr(unsat_point))
         print('... and UNSAT-params point')
-        print(unsat_point)
       if op.cpu_num > 3:
         for p in given_points:
+          if strlistrepr(p) in generated_points:
+            print('Skipped a given point because it is already in the set. Point :')
+            print(str(p) + '\n')
+            continue
           new_points.append(p)
           generated_points.add(strlistrepr(p))
           print('... and given point')
-          print(p)
+          print(str(p) + '\n')
           if len(new_points) == op.cpu_num:
             break
       assert(len(new_points) <= op.cpu_num)
