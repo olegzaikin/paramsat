@@ -7,9 +7,7 @@
 // A point is a set of n integers.
 // Given a point p and an integer number k, k points are generated in
 // the neighborhood of p.
-// 
-// Example:
-//   XXX
+//
 //
 //=============================================================================
 
@@ -75,22 +73,9 @@ unsigned new_param_value(const unsigned current_value, param_t param,
   std::vector<unsigned> weights = calc_weights(indx, param.size());
   // Дискретное распределение, основанное на весах:
   std::discrete_distribution<> dist(weights.begin(), weights.end());
-  /*
-  std::cout << "param :" << std::endl;
-  for (auto x : param) std::cout << x << " ";
-  std::cout << std::endl;
-  std::cout << "Weights :" << std::endl;
-  for (auto x : weights) std::cout << x << " ";
-  std::cout << std::endl;
-  */
   new_index = dist(rand_gen);
   assert(new_index != indx);
   unsigned new_val = param[new_index];
-  /*
-  std::cout << "current_value : " << current_value << std::endl;
-  std::cout << "new_val       : " << new_val << std::endl;
-  std::cout << std::endl;
-  */
   assert(new_val != current_value);
   return new_val;
 }
@@ -151,6 +136,7 @@ void print_point(const point_t p) {
   for (auto x : p) std::cout << x << " ";
   std::cout << "\n";
 }
+
 
 int main(int argc, char** argv) {
   unsigned iteration = 1; // номер итерации поиска
