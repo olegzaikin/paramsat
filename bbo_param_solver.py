@@ -22,7 +22,7 @@
 
 
 script_name = "bbo_param_solver.py"
-version = '0.6.0'
+version = '0.6.1'
 
 import sys
 import glob
@@ -301,7 +301,8 @@ def points_diff(p1 : list, p2 : list, params : list):
   return s0 + s[:-1]
 
 # Run solver on a given point:
-def calc_obj(solver_name : str, sum_time : float, cnfs : list, \
+def calc_obj(solver_name : str, sum_time : float, \
+  max_instance_time_best_point : float,  cnfs : list, \
   params : list, point : list, is_solving : bool):
   assert(len(params) > 1)
   assert(len(params) == len(point))
@@ -310,7 +311,11 @@ def calc_obj(solver_name : str, sum_time : float, cnfs : list, \
   max_time = -1
   is_all_sat = True
   # Solver's time limit on each CNF is the current best obj func value:
-  solver_time_lim = sum_time
+  if max_instance_time_best_point > 0:
+    solver_time_lim = max_instance_time_best_point
+  else:
+    solver_time_lim = sum_time
+  print('solver_time_lim : ' + str(solver_time_lim))
   # Calculate PAR10 for the solver runtimes: sum(time if solved in lim seconds,
   # otherwise lim*10)
   cnf_num = 0
@@ -350,11 +355,12 @@ def calc_obj(solver_name : str, sum_time : float, cnfs : list, \
         with open(cdcl_log_file_name, 'w') as f:
           f.write(cdcl_log)
     # If current value is already worse than the best one:
+    print('sum_time : ' + str(sum_time))
+    print('par10_time : ' + str(par10_time))
     if sum_time > 0 and par10_time >= sum_time:
       print('Current value ' + str(par10_time) + ' is already worse than ' + str(sum_time))
       print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
       break
-
   is_all_sat = False
   if sat_num == len(cnfs):
      is_all_sat = True
@@ -367,6 +373,7 @@ def collect_result(res):
   global best_sum_time
   global best_point
   global best_command
+  global max_instance_time_best_point
   global def_point
   global params
   global processed_points_num
@@ -386,8 +393,10 @@ def collect_result(res):
     best_sum_time = par10_time
     best_point = copy.deepcopy(point)
     best_command = command
+    max_instance_time_best_point = max_time
     elapsed_time = round(time.time() - start_time, 2)
     print('\nUpdated best sum time : ' + str(best_sum_time))
+    print('max_instance_time_best_point : ' + str(max_instance_time_best_point))
     print('elapsed : ' + str(elapsed_time) + ' seconds')
     print(points_diff(def_point, best_point, params))
     print(best_command + '\n')
@@ -559,11 +568,14 @@ if __name__ == '__main__':
   skipped_impos_num = 0
   updates_num = 0
   iter = 0
+  max_instance_time_best_point = -1
   is_extern_break = False
 
   # Repeat until all points a processed:
   while processed_points_num < op.max_points:
     print('\n*** iter : ' + str(iter))
+    elapsed_time = round(time.time() - start_time, 2)
+    print('elapsed : ' + str(elapsed_time) + ' seconds')
     points_to_process = []
     if best_sum_time == -1:
       assert(iter == 0)
@@ -581,7 +593,7 @@ if __name__ == '__main__':
     pool = mp.Pool(op.cpu_num)
     for p in points_to_process:
       assert(len(p) == len(params))
-      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, cnfs, params, p, op.is_solving), callback=collect_result)
+      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, p, op.is_solving), callback=collect_result)
     is_updated = False
     is_inner_break = False
     # Repeat until a new record is found or the processed points limit is reached:
@@ -616,7 +628,7 @@ if __name__ == '__main__':
       # A CPU core is free, so generate a new point and process it:
       one_point_list = oneplusone(best_point, params, paramsdict, 1)
       assert(len(one_point_list) == 1)
-      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, cnfs, params, one_point_list[0], op.is_solving), callback=collect_result)
+      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, one_point_list[0], op.is_solving), callback=collect_result)
     if is_extern_break:
        print('Break main loop')
        break
