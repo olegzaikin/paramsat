@@ -22,7 +22,7 @@
 
 
 script_name = "bbo_param_solver.py"
-version = '0.6.1'
+version = '0.6.2'
 
 import sys
 import glob
@@ -41,6 +41,7 @@ def print_usage():
   print('  Options :\n' +\
   '  -defobj=<float>        - (default : -1)   objective funtion value for the default point' + '\n' +\
   '  -maxpoints=<int>       - (default : 1000) maximum number of points to process' + '\n' +\
+  '  -maxtime=<int>         - (default : 86400) maximum time' + '\n' +\
   '  -pointsfile=<string>   - (default : "")   path to a file with points' + '\n' +\
   '  -cpunum=<int>          - (default : 1)    number of used CPU cores' + '\n' +\
   '  -seed=<int>            - (default : time) seed for pseudorandom generator' + '\n' +\
@@ -51,6 +52,7 @@ def print_usage():
 class Options:
 	def_point_time = -1
 	max_points = 1000
+	max_time = -1
 	points_file = ''
 	cpu_num = 1
 	seed = 0
@@ -59,17 +61,19 @@ class Options:
 		self.def_point_time = -1
 		self.solvertimelim = -1
 		self.max_points = 1000
+		self.max_time = 86400
 		self.points_file = ''
 		self.cpu_num = 1
 		self.seed = round(time.time() * 1000)
 		self.is_solving = False
 	def __str__(self):
 		s = 'def_point_time  : ' + str(self.def_point_time) + '\n' +\
-        'max_points      : ' + str(self.max_points) + '\n' +\
-        'points_file     : ' + str(self.points_file) + '\n' +\
-        'cpu_num         : ' + str(self.cpu_num) + '\n' +\
-		    'seed            : ' + str(self.seed) + '\n' +\
-		    'is_solving      : ' + str(self.is_solving)
+		'max_points      : ' + str(self.max_points) + '\n' +\
+		'max_time        : ' + str(self.max_time) + '\n' +\
+		'points_file     : ' + str(self.points_file) + '\n' +\
+		'cpu_num         : ' + str(self.cpu_num) + '\n' +\
+		'seed            : ' + str(self.seed) + '\n' +\
+		'is_solving      : ' + str(self.is_solving)
 		return s
 	def read(self, argv) :
 		for p in argv:
@@ -77,6 +81,8 @@ class Options:
 				self.def_point_time = math.ceil(float(p.split('-defobj=')[1]))
 			if '-maxpoints=' in p:
 				self.max_points = math.ceil(float(p.split('-maxpoints=')[1]))
+			if '-maxtime=' in p:
+				self.max_time = math.ceil(float(p.split('-maxtime=')[1]))
 			if '-pointsfile=' in p:
 				self.points_file = p.split('-pointsfile=')[1]
 			if '-cpunum=' in p:
@@ -570,9 +576,10 @@ if __name__ == '__main__':
   iter = 0
   max_instance_time_best_point = -1
   is_extern_break = False
+  elapsed_time = 0
 
   # Repeat until all points a processed:
-  while processed_points_num < op.max_points:
+  while processed_points_num < op.max_points and elapsed_time < op.max_time:
     print('\n*** iter : ' + str(iter))
     elapsed_time = round(time.time() - start_time, 2)
     print('elapsed : ' + str(elapsed_time) + ' seconds')
@@ -602,8 +609,13 @@ if __name__ == '__main__':
         time.sleep(1)
       processed_points_num += 1
       print('processed_points_num : ' + str(processed_points_num))
+      elapsed_time = round(time.time() - start_time, 2)
+      print('elapsed : ' + str(elapsed_time) + ' seconds')
       if processed_points_num >= op.max_points:
         print('The limit on the number of points is reached, break.')
+        is_inner_break = True
+      elif elapsed_time >= op.max_time:
+        print('The time limit is reached, break.')
         is_inner_break = True
       if is_updated:
         print('is_updated==True in inner loop')
