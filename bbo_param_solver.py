@@ -22,7 +22,7 @@
 
 
 script_name = "bbo_param_solver.py"
-version = '0.6.2'
+version = '0.6.3'
 
 import sys
 import glob
@@ -459,6 +459,24 @@ def read_points(points_file_name : str, def_point : list, paramsdict : dict):
       given_points.append(point)
   return given_points
 
+# Write final best point as a pcs file:
+def write_final_pcs(best_point : list, params : list, cnfs : list):
+  assert(len(best_point) == len(params))
+  outname = 'final_best_'
+  for x in cnfs:
+    assert('.cnf' in x)
+    outname += os.path.basename(x.split('.cnf')[0])
+    if x != cnfs[-1]:
+      outname += '_'
+  outname += '.pcs'
+  with open(outname, 'w') as ofile:
+    for i in range(len(best_point)):
+      ofile.write(params[i].name + ' {')
+      for v in params[i].values[:-1]:
+        ofile.write(str(v) + ', ')
+      ofile.write(str(params[i].values[-1]) + '}')
+      ofile.write('[' + str(best_point[i]) + ']\n')
+
 # Main function:
 if __name__ == '__main__':
   if len(sys.argv) < 4:
@@ -648,6 +666,10 @@ if __name__ == '__main__':
 
   # Write generated points:
   write_points(generated_points_strings, cnfs)
+
+  # Write final pcs file:
+  write_final_pcs(best_point, params, cnfs)
+
   # Print statistics:
   elapsed_time = round(time.time() - start_time, 2)
   print('\nElapsed : ' + str(elapsed_time) + ' seconds')
