@@ -17,12 +17,10 @@
 #========================================================================================
 #
 # TODOs:
-# 0. Print the final best point as pcs-file.
-# 1. Extend to unsatisfiable CNFs.
-
+# 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.6.3'
+version = '0.6.4'
 
 import sys
 import glob
@@ -120,11 +118,12 @@ def read_pcs(param_file_name : str):
       assert('}' in line)
       assert('[' in line)
       assert(']' in line)
+      #print(line)
       words = line.strip().split(' ')
       assert(len(words) > 2)
+      #print(words)
       prm = Param()
       prm.name = words[0]
-      #print(p.name)
       defstr = line.split('[')[1].split(']')[0]
       prm.default = convert_if_int(defstr)
       valuesstr = line.split('{')[1].split('}')[0].replace(' ', '')
@@ -134,7 +133,7 @@ def read_pcs(param_file_name : str):
           prm.values.append(convert_if_int(x))
       assert(len(prm.values) > 1)
       assert(prm.default in ['true', 'false'] or isinstance(prm.default, int))
-      #print(str(len(p.values)))
+      #print(str(len(prm.values)))
       for val in prm.values:
         #print(val)
         assert(val in ['true', 'false'] or isinstance(val, int))
@@ -510,7 +509,7 @@ if __name__ == '__main__':
   params = read_pcs(param_file_name)
   total_val_num = 0
   print(str(len(params)) + ' parameters')
-  print(str(total_val_num) + ' values in all parameters')
+  
 
   paramsdict = dict()
   for i in range(len(params)):
@@ -522,6 +521,8 @@ if __name__ == '__main__':
   for prm in params:
     total_val_num += len(prm.values)
     def_point.append(prm.default)
+  print(str(total_val_num) + ' values in all parameters')
+  assert(total_val_num > 0)
   assert(len(def_point) == len(params))
   print('Default point :')
   print(str(def_point))
@@ -571,22 +572,26 @@ if __name__ == '__main__':
       sat_point = copy.deepcopy(def_point)
       sat_point[paramsdict['target']] = 2
       sat_point[paramsdict['restartint']] = 50
-      assert(sat_point != def_point)
       assert(len(sat_point) == len(params))
-      generated_points_strings.add(strlistrepr(sat_point))
-      start_points.append(sat_point)
-      print('... and SAT-params point :')
-      print(str(sat_point))
+      if (sat_point != def_point):
+        generated_points_strings.add(strlistrepr(sat_point))
+        start_points.append(sat_point)
+        print('... and SAT-params point :')
+        print(str(sat_point))
+      else:
+        print('SAT-point == def-point')
     if op.cpu_num > 2:
       # UNSAT point, i.e. --stable=0:
       unsat_point = copy.deepcopy(def_point)
       unsat_point[paramsdict['stable']] = 0
       assert(len(unsat_point) == len(params))
-      assert(unsat_point != sat_point)
-      generated_points_strings.add(strlistrepr(unsat_point))
-      start_points.append(unsat_point)
-      print('... and UNSAT-params point :')
-      print(str(unsat_point))
+      if unsat_point != def_point:
+        generated_points_strings.add(strlistrepr(unsat_point))
+        start_points.append(unsat_point)
+        print('... and UNSAT-params point :')
+        print(str(unsat_point))
+      else:
+        print('UNSAT-point == def_point')
 
   skipped_repeat_num = 0
   skipped_impos_num = 0
@@ -636,7 +641,6 @@ if __name__ == '__main__':
         print('The time limit is reached, break.')
         is_inner_break = True
       if is_updated:
-        print('is_updated==True in inner loop')
         assert(best_sum_time > 0)
         if op.is_solving:
           # 1 solution is enough in the solving mode:
@@ -646,6 +650,7 @@ if __name__ == '__main__':
         is_updated = False
         is_inner_break = True
       if is_inner_break:
+        print('Break inner loop.')
         kill_solver(solver_name, len(cnfs))
         time.sleep(1)
         assert(len(pool._cache) == 0)
