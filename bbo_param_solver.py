@@ -20,7 +20,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.6.4'
+version = '0.6.5'
 
 import sys
 import glob
@@ -37,13 +37,14 @@ import multiprocessing as mp
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-folder [Options]')
   print('  Options :\n' +\
-  '  -defobj=<float>        - (default : -1)   objective funtion value for the default point' + '\n' +\
-  '  -maxpoints=<int>       - (default : 1000) maximum number of points to process' + '\n' +\
+  '  -defobj=<float>        - (default : -1)    objective funtion value for the default point' + '\n' +\
+  '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
   '  -maxtime=<int>         - (default : 86400) maximum time' + '\n' +\
-  '  -pointsfile=<string>   - (default : "")   path to a file with points' + '\n' +\
-  '  -cpunum=<int>          - (default : 1)    number of used CPU cores' + '\n' +\
-  '  -seed=<int>            - (default : time) seed for pseudorandom generator' + '\n' +\
-  '  --solving              - (default : off)  solving mode' + '\n\n' +\
+  '  -pointsfile=<string>   - (default : "")    path to a file with points' + '\n' +\
+  '  -origpcsfile=<string>  - (default : "")    path to the original parameters file' + '\n' +\
+  '  -cpunum=<int>          - (default : 1)     number of used CPU cores' + '\n' +\
+  '  -seed=<int>            - (default : time)  seed for pseudorandom generator' + '\n' +\
+  '  --solving              - (default : off)   solving mode' + '\n\n' +\
   'Points from the -pointsfile are used along with those which are generated.')
 
 # Input options:
@@ -52,6 +53,7 @@ class Options:
 	max_points = 1000
 	max_time = -1
 	points_file = ''
+	defpcs_file = ''
 	cpu_num = 1
 	seed = 0
 	is_solving = False
@@ -61,6 +63,7 @@ class Options:
 		self.max_points = 1000
 		self.max_time = 86400
 		self.points_file = ''
+		self.origpcs_file = ''
 		self.cpu_num = 1
 		self.seed = round(time.time() * 1000)
 		self.is_solving = False
@@ -69,6 +72,7 @@ class Options:
 		'max_points      : ' + str(self.max_points) + '\n' +\
 		'max_time        : ' + str(self.max_time) + '\n' +\
 		'points_file     : ' + str(self.points_file) + '\n' +\
+		'origpcs_file    : ' + str(self.origpcs_file) + '\n' +\
 		'cpu_num         : ' + str(self.cpu_num) + '\n' +\
 		'seed            : ' + str(self.seed) + '\n' +\
 		'is_solving      : ' + str(self.is_solving)
@@ -83,6 +87,8 @@ class Options:
 				self.max_time = math.ceil(float(p.split('-maxtime=')[1]))
 			if '-pointsfile=' in p:
 				self.points_file = p.split('-pointsfile=')[1]
+			if '-origpcsfile=' in p:
+				self.origpcs_file = p.split('-origpcsfile=')[1]
 			if '-cpunum=' in p:
 				self.cpu_num = int(p.split('-cpunum=')[1])
 			if '-seed=' in p:
@@ -507,17 +513,9 @@ if __name__ == '__main__':
   print('Solver name changed to ' + new_solver_name)
 
   params = read_pcs(param_file_name)
-  total_val_num = 0
-  print(str(len(params)) + ' parameters')
-  
-
-  paramsdict = dict()
-  for i in range(len(params)):
-    paramsdict[params[i].name] = i
-  print('Dictionary of parameters :')
-  print(paramsdict)
 
   def_point = list()
+  total_val_num = 0
   for prm in params:
     total_val_num += len(prm.values)
     def_point.append(prm.default)
@@ -526,6 +524,31 @@ if __name__ == '__main__':
   assert(len(def_point) == len(params))
   print('Default point :')
   print(str(def_point))
+
+  # Read original parameters if given:
+  orig_params = []
+  orig_point = []
+  if op.origpcs_file != '':
+    orig_params = read_pcs(op.origpcs_file)
+    orig_val_num = 0
+    for prm in orig_params:
+      orig_val_num += len(prm.values)
+      orig_point.append(prm.default)
+    print(str(orig_val_num) + ' values in original parameters')
+    assert(orig_val_num > 0)
+    assert(orig_val_num == total_val_num)
+    assert(len(orig_point) == len(params))
+    print('Original point :')
+    print(str(orig_point))
+
+  total_val_num = 0
+  print(str(len(params)) + ' parameters')
+
+  paramsdict = dict()
+  for i in range(len(params)):
+    paramsdict[params[i].name] = i
+  print('DictionaryA of parameters :')
+  print(paramsdict)  
 
   # Read points which are given in a text file:
   given_points = read_points(op.points_file, def_point, paramsdict)
@@ -592,6 +615,40 @@ if __name__ == '__main__':
         print(str(unsat_point))
       else:
         print('UNSAT-point == def_point')
+    if op.cpu_num > 3 and len(orig_point) > 0:
+      # Original default point:
+      if (orig_point != def_point):
+        generated_points_strings.add(strlistrepr(orig_point))
+        start_points.append(orig_point)
+        print('... and original default point :')
+        print(str(orig_point))
+      else:
+        print('orig-point == def-point')
+    if op.cpu_num > 4 and len(orig_point) > 0:
+      # original SAT point, i.e. orig with --target=2 --restartint=50:
+      sat_orig_point = copy.deepcopy(orig_point)
+      sat_orig_point[paramsdict['target']] = 2
+      sat_orig_point[paramsdict['restartint']] = 50
+      assert(len(sat_orig_point) == len(orig_params))
+      if (sat_orig_point != orig_point and sat_orig_point != def_point):
+        generated_points_strings.add(strlistrepr(sat_orig_point))
+        start_points.append(sat_orig_point)
+        print('... and SAT-orig-params point :')
+        print(str(sat_orig_point))
+      else:
+        print('SAT-point == def-point')
+    if op.cpu_num > 5 and len(orig_point) > 0:
+      # original UNSAT point, i.e. orig with --stable=0:
+      unsat_orig_point = copy.deepcopy(orig_point)
+      unsat_orig_point[paramsdict['stable']] = 0
+      assert(len(unsat_orig_point) == len(params))
+      if unsat_orig_point != orig_point and unsat_orig_point != def_point:
+        generated_points_strings.add(strlistrepr(unsat_orig_point))
+        start_points.append(unsat_orig_point)
+        print('... and UNSAT-orig-params point :')
+        print(str(unsat_orig_point))
+      else:
+        print('UNSAT-orig-point == orig_point')
 
   skipped_repeat_num = 0
   skipped_impos_num = 0
@@ -610,7 +667,7 @@ if __name__ == '__main__':
     if best_sum_time == -1:
       assert(iter == 0)
       # Only def, sat, and unsat points:
-      assert(len(start_points) <= 3)
+      assert(len(start_points) <= 6)
       for p in start_points:
         assert(len(p) == len(params))
         points_to_process.append(p)
