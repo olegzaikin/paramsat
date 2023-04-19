@@ -1,4 +1,4 @@
-#!/usr/bin/bash
+#!/usr/bin/bashB
 
 # Created on: 11 Jan 2022
 # Author: Oleg Zaikin
@@ -20,7 +20,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.6.5'
+version = '0.6.6'
 
 import sys
 import glob
@@ -289,7 +289,7 @@ def oneplusone(point : list, params : list, paramsdict : dict, points_num : int)
     # If point has been already processed:
     if strlistrepr(pnt) in generated_points_strings:
       skipped_repeat_num += 1
-      print(str(skipped_repeat_num) + ' repeated points skipped')
+      #print(str(skipped_repeat_num) + ' repeated points skipped')
     else:
       # New point and possible combination:
       generated_points_strings.add(strlistrepr(pnt))
@@ -586,69 +586,65 @@ if __name__ == '__main__':
     processed_points_num = 1 # the default point is processed
     assert(len(generated_points_strings) == 1)
     assert(default_sum_time > 0)
-  # If default point's runtime is not given, generate default points: 
-  else: 
+  # If default point's runtime is not given, generate default points:
+  else:
     assert(default_sum_time == -1)
-    print('Runtime for default point is not given, process it.')
-    if op.cpu_num > 1:
-      # SAT point, i.e. --target=2 --restartint=50:
-      sat_point = copy.deepcopy(def_point)
-      sat_point[paramsdict['target']] = 2
-      sat_point[paramsdict['restartint']] = 50
-      assert(len(sat_point) == len(params))
-      if (sat_point != def_point):
-        generated_points_strings.add(strlistrepr(sat_point))
-        start_points.append(sat_point)
-        print('... and SAT-params point :')
-        print(str(sat_point))
-      else:
-        print('SAT-point == def-point')
-    if op.cpu_num > 2:
-      # UNSAT point, i.e. --stable=0:
-      unsat_point = copy.deepcopy(def_point)
-      unsat_point[paramsdict['stable']] = 0
-      assert(len(unsat_point) == len(params))
-      if unsat_point != def_point:
-        generated_points_strings.add(strlistrepr(unsat_point))
-        start_points.append(unsat_point)
-        print('... and UNSAT-params point :')
-        print(str(unsat_point))
-      else:
-        print('UNSAT-point == def_point')
-    if op.cpu_num > 3 and len(orig_point) > 0:
+    print('Runtime for default point is not given, process it:')
+    print(str(def_point))
+    # SAT point, i.e. --target=2 --restartint=50:
+    sat_point = copy.deepcopy(def_point)
+    sat_point[paramsdict['target']] = 2
+    sat_point[paramsdict['restartint']] = 50
+    assert(len(sat_point) == len(params))
+    if (sat_point not in start_points):
+      start_points.append(sat_point)
+      print('... and SAT-params point :')
+      print(str(sat_point))
+    else:
+      print('SAT-point already exists')
+    # UNSAT point, i.e. --stable=0:
+    unsat_point = copy.deepcopy(def_point)
+    unsat_point[paramsdict['stable']] = 0
+    assert(len(unsat_point) == len(params))
+    if unsat_point not in start_points:
+      start_points.append(unsat_point)
+      print('... and UNSAT-params point :')
+      print(str(unsat_point))
+    else:
+      print('UNSAT-point already exists')
+    if len(orig_point) > 0:
       # Original default point:
-      if (orig_point != def_point):
-        generated_points_strings.add(strlistrepr(orig_point))
+      if orig_point not in start_points:
         start_points.append(orig_point)
         print('... and original default point :')
         print(str(orig_point))
       else:
-        print('orig-point == def-point')
-    if op.cpu_num > 4 and len(orig_point) > 0:
+        print('orig-point already exists')
       # original SAT point, i.e. orig with --target=2 --restartint=50:
       sat_orig_point = copy.deepcopy(orig_point)
       sat_orig_point[paramsdict['target']] = 2
       sat_orig_point[paramsdict['restartint']] = 50
       assert(len(sat_orig_point) == len(orig_params))
-      if (sat_orig_point != orig_point and sat_orig_point != def_point):
-        generated_points_strings.add(strlistrepr(sat_orig_point))
+      if (sat_orig_point not in start_points):
         start_points.append(sat_orig_point)
         print('... and SAT-orig-params point :')
         print(str(sat_orig_point))
       else:
-        print('SAT-point == def-point')
-    if op.cpu_num > 5 and len(orig_point) > 0:
+        print('SAT-point already exists')
       # original UNSAT point, i.e. orig with --stable=0:
       unsat_orig_point = copy.deepcopy(orig_point)
       unsat_orig_point[paramsdict['stable']] = 0
       assert(len(unsat_orig_point) == len(params))
-      if unsat_orig_point != orig_point and unsat_orig_point != def_point:
-        generated_points_strings.add(strlistrepr(unsat_orig_point))
+      if unsat_orig_point not in start_points:
         start_points.append(unsat_orig_point)
         print('... and UNSAT-orig-params point :')
         print(str(unsat_orig_point))
       else:
-        print('UNSAT-orig-point == orig_point')
+        print('UNSAT-orig-point already exists')
+  
+  if op.cpu_num < len(start_points):
+    start_points = start_points[:op.cpu_num]
+    print('start_points was reduced to ' + str(len(start_points)))
 
   skipped_repeat_num = 0
   skipped_impos_num = 0
