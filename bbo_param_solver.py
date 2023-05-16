@@ -1,6 +1,4 @@
-#!/usr/bin/bashB
-
-# Created on: 11 Jan 2022
+# Created on: 11 Jan 2023
 # Author: Oleg Zaikin
 # E-mail: zaikin.icc@gmail.com
 #
