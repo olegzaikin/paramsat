@@ -1,5 +1,6 @@
 __pycache__
 *.cnf
+*.wcnf
 help
 range
 *.pcs
@@ -9,3 +10,4 @@ generated*
 log*
 points*
 a.out
+loandra*

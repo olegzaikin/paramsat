@@ -109,7 +109,7 @@ class Param:
 def convert_if_int(x : str):
   if x in ['true', 'false']:
     return x
-  assert(x.isnumeric())
+  assert(x.lstrip("-").isnumeric())
   return int(x)
 
 # Read SAT solver's parameters:
@@ -146,21 +146,26 @@ def read_pcs(param_file_name : str):
   return params
 
 # Parse a CDCL solver's log:
-def parse_cdcl_result(cdcl_log : str):
+def parse_cdcl_result(cdcl_log : str, solver_name : str):
 	t = -1.0
 	sat = -1
 	refuted_leaves = -1
 	lines = cdcl_log.split('\n')
 	for line in lines:
-		if 'c process-time' in line:
+		if 'kissat' in solver_name and 'c process-time' in line:
 			words = line.split()
 			assert(len(words) >= 4)
 			assert(words[-1] == 'seconds')
 			t = float(words[-2])
+		elif 'loandra' in solver_name and 'best 37 LB: ' in line:
+			words = line.split()
+			# c LIN best 37 LB: 26 at 27 - here the last word is seconds
+			assert(len(words) == 8)
+			t = float(words[-1])
+			print('loandra time : ' + str(t))
 		assert('s UNSATISFIABLE' not in line)
 		if 's SATISFIABLE' in line:
-                  sat = 1
-	assert(t > 0)
+			sat = 1
 	return t, sat
 
 # Kill a solver:
@@ -309,6 +314,31 @@ def points_diff(p1 : list, p2 : list, params : list):
   assert(s != '')
   return s0 + s[:-1]
 
+# Form a command for calling a solver:
+def solver_call_command(solver_name : str, cnf_file_name : str, \
+                        solver_time_lim : float, params : list, point : list):
+  sys_str = ''
+  if solver_time_lim > 0:
+    str_lim = str(math.ceil(solver_time_lim))
+    if 'kissat' in solver_name:
+      sys_str = solver_name + ' --time=' + str_lim
+    elif 'loandra' in solver_name:
+      sys_str = 'timeout ' + str_lim + ' ' + solver_name + ' -verbosity=1'
+    else:
+      sys_str = 'timeout ' + str_lim + ' ' + solver_name
+  else:
+     assert('kissat' in solver_name)
+     sys_str = solver_name
+  sys_str += ' '
+  if 'kissat' in solver_name:
+    prefix = '--'
+  else:
+    prefix = '-'
+  for i in range(len(params)):
+    sys_str += prefix + params[i].name + '=' + str(point[i]) + ' '
+  sys_str += cnf_file_name
+  return sys_str
+
 # Run solver on a given point:
 def calc_obj(solver_name : str, sum_time : float, \
   max_instance_time_best_point : float,  cnfs : list, \
@@ -331,17 +361,10 @@ def calc_obj(solver_name : str, sum_time : float, \
   sat_num = 0
   for cnf_file_name in cnfs:
     cnf_num += 1
-    sys_str = ''
-    if solver_time_lim > 0:
-      sys_str = solver_name + ' --time=' + str(math.ceil(solver_time_lim)) + ' '
-    else:
-      sys_str = solver_name + ' '
-    for i in range(len(params)):
-      sys_str += '--' + params[i].name + '=' + str(point[i]) + ' '
-    sys_str += cnf_file_name
+    sys_str = solver_call_command(solver_name, cnf_file_name, solver_time_lim, params, point)
     #print(sys_str)
     cdcl_log = os.popen(sys_str).read()
-    t, sat = parse_cdcl_result(cdcl_log)
+    t, sat = parse_cdcl_result(cdcl_log, solver_name)
     assert(t > 0)
     assert(sat == -1 or sat == 1)
     if sat == 1:
@@ -414,8 +437,7 @@ def collect_result(res):
 def read_cnfs(cnfs_folder_name : str):
   cnfs = list()
   os.chdir('.')
-  for f in glob.glob(cnfs_folder_name + '/*.cnf'):
-    assert('.cnf' in f)
+  for f in glob.glob(cnfs_folder_name + '/*.*cnf'):
     cnfs.append(f)
   return cnfs
 
@@ -433,7 +455,7 @@ def write_points(points : list, cnfs : list):
   out_name = 'generated_'
   cleared_cnfs = []
   for x in cnfs:
-    assert('.cnf' in x)
+    #assert('.cnf' in x)
     out_name += os.path.basename(x.split('.cnf')[0])
     if x != cnfs[-1]:
       out_name += '_'
@@ -467,7 +489,7 @@ def write_final_pcs(best_point : list, params : list, cnfs : list):
   assert(len(best_point) == len(params))
   outname = 'final_best_'
   for x in cnfs:
-    assert('.cnf' in x)
+    #assert('.cnf' in x)
     outname += os.path.basename(x.split('.cnf')[0])
     if x != cnfs[-1]:
       outname += '_'
@@ -665,6 +687,9 @@ if __name__ == '__main__':
       for p in start_points:
         assert(len(p) == len(params))
         points_to_process.append(p)
+    # Force processing the default point for MaxSAT:
+    if 'loandra' in solver_name and iter == 0:
+      points_to_process.append(def_point)
     oneplusone_points = oneplusone(best_point, params, paramsdict, op.cpu_num - len(points_to_process))
     print('Generated ' + str(len(oneplusone_points)) + ' oneplusone points')
     for p in oneplusone_points:
