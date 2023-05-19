@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.6.6'
+version = '0.7.0'
 
 import sys
 import glob
