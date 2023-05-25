@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.7.0'
+version = '0.7.1'
 
 import sys
 import glob
@@ -157,7 +157,7 @@ def parse_cdcl_result(cdcl_log : str, solver_name : str):
 			assert(len(words) >= 4)
 			assert(words[-1] == 'seconds')
 			t = float(words[-2])
-		elif 'loandra' in solver_name and 'best 37 LB: ' in line:
+		elif 'loandra' in solver_name and 'best 36 LB: ' in line:
 			words = line.split()
 			# c LIN best 37 LB: 26 at 27 - here the last word is seconds
 			assert(len(words) == 8)
@@ -726,9 +726,12 @@ if __name__ == '__main__':
         is_updated = False
         is_inner_break = True
       if is_inner_break:
-        print('Break inner loop.')
-        kill_solver(solver_name, len(cnfs))
-        time.sleep(1)
+        k = 0
+        while len(pool._cache) > 0:
+          print('Break inner loop, attempt ' + str(k))
+          kill_solver(solver_name, len(cnfs))
+          time.sleep(1)
+          k += 1
         assert(len(pool._cache) == 0)
         assert(len(points_to_process) == op.cpu_num)
         processed_points_num += op.cpu_num - 1
