@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.7.1'
+version = '0.7.2'
 
 import sys
 import glob
@@ -105,13 +105,6 @@ class Param:
     self.default = -1
     self.values = []
 
-# Convert string to int if not Boolean:
-def convert_if_int(x : str):
-  if x in ['true', 'false']:
-    return x
-  assert(x.lstrip("-").isnumeric())
-  return int(x)
-
 # Read SAT solver's parameters:
 def read_pcs(param_file_name : str):
   params = []
@@ -122,31 +115,31 @@ def read_pcs(param_file_name : str):
       assert('}' in line)
       assert('[' in line)
       assert(']' in line)
-      #print(line)
       words = line.strip().split(' ')
       assert(len(words) > 2)
-      #print(words)
       prm = Param()
       prm.name = words[0]
       defstr = line.split('[')[1].split(']')[0]
-      prm.default = convert_if_int(defstr)
+      #prm.default = convert_if_int(defstr)
+      prm.default = defstr
       valuesstr = line.split('{')[1].split('}')[0].replace(' ', '')
       lst = valuesstr.split(',')
       #print(lst)
       for x in lst:
-          prm.values.append(convert_if_int(x))
+          #prm.values.append(convert_if_int(x))
+          prm.values.append(x)
       assert(len(prm.values) > 1)
-      assert(prm.default in ['true', 'false'] or isinstance(prm.default, int))
+      #assert(prm.default in ['true', 'false'] or isinstance(prm.default, int))
       #print(str(len(prm.values)))
-      for val in prm.values:
+      #for val in prm.values:
         #print(val)
-        assert(val in ['true', 'false'] or isinstance(val, int))
+      #  assert(val in ['true', 'false'] or isinstance(val, int))
       params.append(prm)
   assert(len(params) > 0)
   return params
 
 # Parse a CDCL solver's log:
-def parse_cdcl_result(cdcl_log : str, solver_name : str):
+def parse_solver_result(cdcl_log : str, solver_name : str):
 	t = -1.0
 	sat = -1
 	refuted_leaves = -1
@@ -157,7 +150,7 @@ def parse_cdcl_result(cdcl_log : str, solver_name : str):
 			assert(len(words) >= 4)
 			assert(words[-1] == 'seconds')
 			t = float(words[-2])
-		elif 'loandra' in solver_name and 'best 36 LB: ' in line:
+		elif 'loandra' in solver_name and 'best 39 LB: ' in line:
 			words = line.split()
 			# c LIN best 37 LB: 26 at 27 - here the last word is seconds
 			assert(len(words) == 8)
@@ -330,12 +323,17 @@ def solver_call_command(solver_name : str, cnf_file_name : str, \
      assert('kissat' in solver_name)
      sys_str = solver_name
   sys_str += ' '
-  if 'kissat' in solver_name:
-    prefix = '--'
-  else:
-    prefix = '-'
   for i in range(len(params)):
-    sys_str += prefix + params[i].name + '=' + str(point[i]) + ' '
+    val = ''
+    if 'kissat' in solver_name:
+      sys_str += '--' + params[i].name + '=' + point[i] + ' '
+    elif 'loandra' in solver_name:
+      if point[i] == 'true':
+         sys_str += '-' + params[i].name + ' '
+      elif point[i] == 'false':
+         sys_str += '-no-' + params[i].name + ' '
+      else: 
+         sys_str += '-' + params[i].name + '=' + point[i] + ' '
   sys_str += cnf_file_name
   return sys_str
 
@@ -364,7 +362,7 @@ def calc_obj(solver_name : str, sum_time : float, \
     sys_str = solver_call_command(solver_name, cnf_file_name, solver_time_lim, params, point)
     #print(sys_str)
     cdcl_log = os.popen(sys_str).read()
-    t, sat = parse_cdcl_result(cdcl_log, solver_name)
+    t, sat = parse_solver_result(cdcl_log, solver_name)
     assert(t > 0)
     assert(sat == -1 or sat == 1)
     if sat == 1:
@@ -478,7 +476,7 @@ def read_points(points_file_name : str, def_point : list, paramsdict : dict):
       for word in words:
         param_name = word.split('--')[1].split('=')[0]
         if param_name in paramsdict:
-          value = convert_if_int(word.split('=')[1])
+          value = word.split('=')[1]
           point[paramsdict[param_name]] = value
       assert(len(point) == len(def_point))
       given_points.append(point)
@@ -608,6 +606,8 @@ if __name__ == '__main__':
     assert(default_sum_time > 0)
   # If default point's runtime is not given, generate default points:
   else:
+    # Loandra has to be stopped:
+    assert('loandra' not in solver_name) 
     assert(default_sum_time == -1)
     print('Runtime for default point is not given, process it:')
     print(str(def_point))
@@ -676,6 +676,7 @@ if __name__ == '__main__':
 
   # Repeat until all points a processed:
   while processed_points_num < op.max_points and elapsed_time < op.max_time:
+    print('***')
     print('\n*** iter : ' + str(iter))
     elapsed_time = round(time.time() - start_time, 2)
     print('elapsed : ' + str(elapsed_time) + ' seconds')
