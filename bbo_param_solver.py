@@ -20,7 +20,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.8.0'
+version = '0.8.1'
 
 import sys
 import glob
@@ -579,7 +579,7 @@ if __name__ == '__main__':
   generated_points_strings = set()
   start_points = []
 
-  generated_points_strings.add(strlistrepr(def_point))
+  
   start_points.append(def_point)
   # In runtime on default point is given, mark it as generated and processed:
   if default_sum_time > 0:
@@ -667,6 +667,7 @@ if __name__ == '__main__':
       for p in start_points:
         assert(len(p) == len(params))
         points_to_process.append(p)
+        generated_points_strings.add(strlistrepr(p))
     oneplusone_points = oneplusone(best_point, params, paramsdict, op.cpu_num - len(points_to_process))
     print('Generated ' + str(len(oneplusone_points)) + ' oneplusone points')
     for p in oneplusone_points:
