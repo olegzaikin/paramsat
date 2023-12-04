@@ -3,9 +3,9 @@ __pycache__
 *.wcnf
 help
 range
-*.pcs
 out*
-kissat3*
+kissat3
+kissat3_*
 generated*
 final*
 log*
