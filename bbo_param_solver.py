@@ -20,7 +20,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.8.1'
+version = '0.8.2'
 
 import sys
 import glob
@@ -602,16 +602,6 @@ if __name__ == '__main__':
       print(str(sat_point))
     else:
       print('SAT-point already exists')
-    # UNSAT point, i.e. --stable=0:
-    unsat_point = copy.deepcopy(def_point)
-    unsat_point[paramsdict['stable']] = 0
-    assert(len(unsat_point) == len(params))
-    if unsat_point not in start_points:
-      start_points.append(unsat_point)
-      print('... and UNSAT-params point :')
-      print(str(unsat_point))
-    else:
-      print('UNSAT-point already exists')
     if len(orig_point) > 0:
       # Original default point:
       if orig_point not in start_points:
@@ -631,16 +621,6 @@ if __name__ == '__main__':
         print(str(sat_orig_point))
       else:
         print('SAT-point already exists')
-      # original UNSAT point, i.e. orig with --stable=0:
-      unsat_orig_point = copy.deepcopy(orig_point)
-      unsat_orig_point[paramsdict['stable']] = 0
-      assert(len(unsat_orig_point) == len(params))
-      if unsat_orig_point not in start_points:
-        start_points.append(unsat_orig_point)
-        print('... and UNSAT-orig-params point :')
-        print(str(unsat_orig_point))
-      else:
-        print('UNSAT-orig-point already exists')
   
   if op.cpu_num < len(start_points):
     start_points = start_points[:op.cpu_num]
@@ -662,8 +642,8 @@ if __name__ == '__main__':
     points_to_process = []
     if best_sum_time == -1:
       assert(iter == 0)
-      # Only def, sat, and unsat points:
-      assert(len(start_points) <= 6)
+      # Only def and sat points:
+      assert(len(start_points) <= 4)
       for p in start_points:
         assert(len(p) == len(params))
         points_to_process.append(p)
