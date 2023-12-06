@@ -1,5 +1,3 @@
-#!/usr/bin/bashB
-
 # Created on: 11 Jan 2022
 # Author: Oleg Zaikin
 # E-mail: zaikin.icc@gmail.com
