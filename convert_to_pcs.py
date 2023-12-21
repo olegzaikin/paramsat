@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.1.11'
+version = '0.2.0'
 
 import sys
 
@@ -42,9 +42,12 @@ parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', 'profile', \
   'backboneeffort', 'bumpreasons', 'eliminateeffort', 'eliminateinit', \
   'eliminateint', 'forwardeffort', 'incremental', 'probeinit', 'probeint', \
   'reduceinit', 'reduceint', 'rephaseinit', 'rephaseint', 'simplify', \
-  'sweepeffort', 'vivifyeffort', 'vivifyirred', 'walkeffort', 'walkinitially', \
-  'bump', 'compact', 'minimize', 'chrono', 'backbonemaxrounds', 'sweep', \
-  'sweepmaxvars', 'eliminate', 'definitions', 'substitute', 'vivify', 'extract']
+  'sweepeffort', 'vivifyeffort', 'vivifyirred', 'walkeffort', \
+  'walkinitially', 'bump', 'compact', 'minimize', 'chrono', \
+  'backbonemaxrounds', 'sweep', 'sweepmaxvars', 'eliminate', 'definitions', \
+  'substitute', 'vivify', 'extract', 'ands', 'defraglim', 'defragsize', \
+  'equivalences', 'forcephase', 'forward', 'ifthenelse', 'otfs', 'phase', \
+  'phasesaving', 'probe', 'promote', 'tumble', 'warmup']
 
 # The following parameters values are chosen manually, here _*_ means default:
 # backbonerounds 1, 10, _100_, 1000
@@ -81,13 +84,6 @@ parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', 'profile', \
 # vivifytier1 1, 2, _3_, 4, 5, 6, 7, 8, 9, 10, 100
 # vivifytier2 1, 2, 3, 4, 5, _6_, 7, 8, 9, 10, 100
 
-# Parameters which are worth varying for still-CNFs:
-still_params = ['backbone', 'backbonerounds', 'bumpreasonslimit', 'bumpreasonsrate', 'definitionticks',\
-  'defraglim', 'defragsize', 'eliminatebound', 'eliminateclslim', 'emafast', 'emaslow', 'mineffort',\
-  'minimizedepth', 'reluctantint', 'reluctantlim', 'restartint', 'restartmargin',\
-  'stable', 'substituteeffort', 'subsumeclslim', 'subsumeocclim', 'sweepfliprounds', 'sweepmaxclauses',\
-  'sweepmaxdepth', 'sweepvars', 'target', 'tier2', 'tumble', 'vivifytier1', 'vivifytier2']
-
 #
 dm_params = ['backbone', 'definitioncores', 'eliminatebound', 'emafast', 'mineffort',\
   'minimizedepth', 'modeinit', 'otfs', 'restartint', 'stable', 'substituterounds', 'subsumeclslim',\
@@ -109,8 +105,7 @@ def if_parameter_str(s : str, substr : str):
   return False
 
 # Read SAT solver's parameters.
-# If isStill is True, then a reduced parameters space is constructed.
-def read_solver_parameters(param_file_name : str, isStill : bool, isDm : bool):
+def read_solver_parameters(param_file_name : str, isDm : bool):
   params = []
   with open(param_file_name, 'r') as param_file:
     lines = param_file.read().splitlines()
@@ -161,9 +156,6 @@ def read_solver_parameters(param_file_name : str, isStill : bool, isDm : bool):
       assert(isinstance(p.default, int))
       assert(p.left_bound < p.right_bound)
       assert(p.right_bound > 0)
-      if isStill == True and p.name not in still_params:
-        print('Skip non-still parameter')
-        continue
       if isDm == True and p.name not in dm_params:
         print('Skip non-dm parameter')
         continue
@@ -296,7 +288,6 @@ def set_values(params : list):
 def print_usage():
   print('Usage : ' + script_name + ' solver-parameters [Options]')
   print('  Options :\n' +\
-  '  --still - reduced parameters space for the still problems.' + '\n' +\
   '  --dm    - reduced parameters space for the dm problems.' + '\n')
 
 
@@ -307,14 +298,10 @@ if __name__ == '__main__':
     exit(1)
 
   param_file_name = sys.argv[1]
-  isStill = False
   isDm = False
-  if len(sys.argv) > 2 and sys.argv[2] == '--still':
-    isStill = True
-  elif len(sys.argv) > 2 and sys.argv[2] == '--dm':
+  if len(sys.argv) > 2 and sys.argv[2] == '--dm':
     isDm = True
-  assert(not isStill or not isDm)
-  params = read_solver_parameters(param_file_name, isStill, isDm)
+  params = read_solver_parameters(param_file_name, isDm)
   #print(str(len(params)) + ' params')
 
   values_num, pcs_str = set_values(params)
