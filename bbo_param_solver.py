@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.8.2'
+version = '0.8.4'
 
 import sys
 import glob
@@ -353,7 +353,7 @@ def calc_obj(solver_name : str, sum_time : float, \
       # Only if a CNF is solved in time limit:
       par10_time += t
       max_time = t if max_time < t else max_time
-      print('Time : ' + str(t))
+      print('Time : ' + str(t) + ' on CNF ' + cnf_file_name)
       # In solving mode, the CDCL solver's log should be saved:
       if is_solving:
         assert('.cnf' in cnf_file_name)
@@ -430,13 +430,13 @@ def strlistrepr(lst : list):
 
 # Writed generated points to a file:
 def write_points(points : list, cnfs : list):
-  out_name = 'generated_'
-  cleared_cnfs = []
-  for x in cnfs:
-    assert('.cnf' in x)
-    out_name += os.path.basename(x.split('.cnf')[0])
-    if x != cnfs[-1]:
-      out_name += '_'
+  out_name = 'generated_points'
+  #cleared_cnfs = []
+  #for x in cnfs:
+    #assert('.cnf' in x)
+    #out_name += os.path.basename(x.split('.cnf')[0])
+    #if x != cnfs[-1]:
+    #  out_name += '_'
   print('Writing generated points to file ' + out_name)
   with open(out_name, 'w') as f:
     for p in points:
@@ -465,13 +465,13 @@ def read_points(points_file_name : str, def_point : list, paramsdict : dict):
 # Write final best point as a pcs file:
 def write_final_pcs(best_point : list, params : list, cnfs : list):
   assert(len(best_point) == len(params))
-  outname = 'final_best_'
-  for x in cnfs:
-    assert('.cnf' in x)
-    outname += os.path.basename(x.split('.cnf')[0])
-    if x != cnfs[-1]:
-      outname += '_'
-  outname += '.pcs'
+  outname = 'final_best.pcs'
+  #for x in cnfs:
+    #assert('.cnf' in x)
+    #outname += os.path.basename(x.split('.cnf')[0])
+    #if x != cnfs[-1]:
+      #outname += '_'
+  #outname += '.pcs'
   with open(outname, 'w') as ofile:
     for i in range(len(best_point)):
       ofile.write(params[i].name + ' {')
