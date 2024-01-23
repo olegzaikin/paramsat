@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.2.0'
+version = '0.2.1'
 
 import sys
 
@@ -47,7 +47,7 @@ parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', 'profile', \
   'backbonemaxrounds', 'sweep', 'sweepmaxvars', 'eliminate', 'definitions', \
   'substitute', 'vivify', 'extract', 'ands', 'defraglim', 'defragsize', \
   'equivalences', 'forcephase', 'forward', 'ifthenelse', 'otfs', 'phase', \
-  'phasesaving', 'probe', 'promote', 'tumble', 'warmup']
+  'phasesaving', 'probe', 'promote', 'tumble', 'warmup', 'minimizeticks']
 
 # The following parameters values are chosen manually, here _*_ means default:
 # backbonerounds 1, 10, _100_, 1000
