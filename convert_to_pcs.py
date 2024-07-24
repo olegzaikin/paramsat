@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.3.0'
+version = '0.3.1'
 MIN_DOMAIN_LEN_LOG_MODE = 11
 
 import sys
@@ -162,22 +162,26 @@ def read_solver_parameters(param_file_name : str):
 def domains_to_str(params : list):
    res_str = ''
    for p in params:
-      s = p.name + ' {'
+      s = p.name + ' '
       values_len = p.right_bound - p.left_bound + 1
       if p.left_bound == 0 and p.right_bound == 1:
          assert(values_len == 2)
          assert(p.default == 0 or p.default == 1)
          default_bool_str = 'true' if p.default == 1 else 'false'
-         s += 'false, true}[' + default_bool_str + ']'
+         s += '{false, true}[' + default_bool_str + ']'
       elif values_len < MIN_DOMAIN_LEN_LOG_MODE:
+        s += '{'
         for i in range(p.left_bound, p.right_bound + 1):
           s += str(i)
           if i != p.right_bound:
             s += ', '
-        s += '}[' + str(p.default) + ']i'
+        s += '}[' + str(p.default) + ']'
       else:
+        s += '['
         assert(values_len >= MIN_DOMAIN_LEN_LOG_MODE)
-        s += str(p.left_bound) + ', ' + str(p.right_bound) + '}[' + \
+        # 0 is illegal in SMAC3 logarithmic parameter: 
+        mod_left_bound = p.left_bound if p.left_bound > 0 else 1
+        s += str(mod_left_bound) + ', ' + str(p.right_bound) + '][' + \
           str(p.default) + ']il'
       res_str += s + '\n'
    return res_str
