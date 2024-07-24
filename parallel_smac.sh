@@ -12,18 +12,17 @@
 # Example:
 #  parallel_smac.sh ./scenario ROAR 2 
 # runs 2 species of SMAC with the shared directory ./out/
-#  smac --scenario ./scenario --abort-on-first-run-crash false --mode ROAR --shared_model True --input_psmac_dirs ./smac3-output* --seed 1
-#  smac --scenario ./scenario --abort-on-first-run-crash false --mode ROAR --shared_model True --input_psmac_dirs ./smac3-output* --seed 2
+#  smac --scenario ./scenario --abort-on-first-run-crash false --mode SMAC4AC --shared_model True --input_psmac_dirs ./smac3-output* --seed 1
+#  smac --scenario ./scenario --abort-on-first-run-crash false --mode SMAC4AC --shared_model True --input_psmac_dirs ./smac3-output* --seed 2
 #==============================================================================
 
-version="0.0.3"
+version="0.0.4"
 
 scriptname="parallel_smac.sh"
 
-if [ $# -ne 3 ]; then
+if [ $# -ne 2 ]; then
   echo "Usage: $scriptname scenario mode cpunum shareddir"
   echo "  scenario  : path to a file with SMAC scenario"
-  echo "  mode      : SMAC mode (ROAR or SMAC4AC)"
   echo "  cpunum    : CPU cores"
   exit 1
 fi
@@ -31,15 +30,13 @@ fi
 echo "Running $scriptname of version $version"
 
 scenario=$1
-mode=$2
-cpunum=$3
+cpunum=$2
 
 echo "scenario  : $scenario"
-echo "mode      : $mode"
 echo "cpu_num   : $cpunum"
 
 set -x
-for (( i=1; i<=$cpunum; i++ ))
+for (( i=0; i<$cpunum; i++ ))
 do
-    smac --scenario $scenario --abort-on-first-run-crash false --mode $mode --shared_model True --input_psmac_dirs ./smac3-output* --seed $i &> out_$i &
+    smac --scenario $scenario --abort-on-first-run-crash false --mode SMAC4AC --shared_model True --input_psmac_dirs ./smac3-output* --seed $i &> out_$i &
 done
