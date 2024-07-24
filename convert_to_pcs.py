@@ -11,83 +11,81 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.2.1'
+version = '0.3.0'
+MIN_DOMAIN_LEN_LOG_MODE = 11
 
 import sys
 
-# In kissat3, seed, statistics, verbose, quiet, and prifile don't affect the search.
+# In kissat3, the following parameters don't affect the search:
+#   statistics, verbose, quiet, profile, flushproof.
+# The following parameters must be excluded to make kissat deterministic:
+#   seed
+# The following parameters adjust random decisions which are disabled by
+#   default:
+# randec, randecfocused, randeclength, randecstable.
 # The following parameters are in fact not used:
 #   backboneeffort, eliminateeffort, eliminateinit, eliminateint,
 #   forwardeffort, probeinit, probeint, reduceinit, reduceint, rephaseinit,
-#   rephaseint, sweepeffort, vivifyeffort, vivifyirred, walkeffort,
-#   walkinitially.
-# The following parameters are used but not needed:
-#   bump - disables an obligatory CDCL feature.
-#   compact - false-value can be reached by compactlim=0
-#   minimze - false-value can be reached by minimize* parameters
-#   chrono - false-value can be reached by chronolevels=0
-#   backbonemaxrounds - should be constant for a variable backbonerounds
-#   sweep - false-vale can be reached by sweep* parameters
-#   sweepmaxvars - should be constant for a variable sweepvars
-#   incremental - because no incremental solving occurs in parameterisation.
-#   simplify - it enables both probing and elimination, but these
-#   options have their own parameters.
-#   bumpreasons - it almost duplicates bump.
-#   eliminate - false-value can be reached by eliminate* parameters
+#   randecinit, randecint, rephaseint, sweepeffort, transitiveeffort,
+#   vivifyeffort, vivifyirred, walkeffort, walkinitially.
+# The following parameters are true by default while their false-values
+# disables obligatory CDCL or Kissat heuristics:
+#   ands
+#   bump
+#   bumpreasons
+#   compact
+#   chrono
+#   equivalences
+#   extract
+#   forward
+#   ifthenelse
+#   minimize
+#   minimizeticks
+#   otfs
+#   phasesaving
+#   probe
+#   promote
+#   reduce
+#   reluctant
+#   rephase
+#   restart 
+#   transitive
+#   transitivekeep
+#   tumble
+#   vivify
+#   warmup
+# The following parameters are used but not needed for tuning:
+#   backbonemaxrounds - should be constant for backbonerounds
 #   definitions - false-value can be reached by definition* parameters
+#   defragsize - it seems that the watches defragmantation is not called
+#     at all since defragsize is too large (2^18)
+#   defraglim - see above
+#   eliminate - false-value can be reached by eliminate* parameters
+#   forcephase - true-value is target=0 and phasesaving=false
+#   incremental - no incremental solving occurs in tuning
+#   phase - false is not better than true.
+#   simplify - it enables both probing and elimination, but these
+#     options have their own parameters
 #   substitute - false-value can be reached by substitute* parameters
-#   vivify - false-value can be reached by vivify* parameters
-#   extract - false-value can be reached by ands, equivalences, ifthenelse.
-parameters_to_skip = ['seed', 'statistics', 'verbose', 'quiet', 'profile', \
-  'backboneeffort', 'bumpreasons', 'eliminateeffort', 'eliminateinit', \
-  'eliminateint', 'forwardeffort', 'incremental', 'probeinit', 'probeint', \
-  'reduceinit', 'reduceint', 'rephaseinit', 'rephaseint', 'simplify', \
-  'sweepeffort', 'vivifyeffort', 'vivifyirred', 'walkeffort', \
-  'walkinitially', 'bump', 'compact', 'minimize', 'chrono', \
-  'backbonemaxrounds', 'sweep', 'sweepmaxvars', 'eliminate', 'definitions', \
-  'substitute', 'vivify', 'extract', 'ands', 'defraglim', 'defragsize', \
-  'equivalences', 'forcephase', 'forward', 'ifthenelse', 'otfs', 'phase', \
-  'phasesaving', 'probe', 'promote', 'tumble', 'warmup', 'minimizeticks']
+#   sweep - false-value can be reached by sweep* parameters
+#   sweepmaxvars - should be constant for sweepvars
 
-# The following parameters values are chosen manually, here _*_ means default:
-# backbonerounds 1, 10, _100_, 1000
-# bumpreasonslimit 1, 2, 4, 8, _10_, 16, 32, 64, 128, 256, 512, 2147483647
-# chronolevels 0, 10, _100_, 1000, 2147483647
-# definitionticks 0, 100, 10000, _1000000_, 100000000, 2147483647
-# defragsize 10, 2048, _262144_, 16777216, 2147483647
-# eliminateclslim 1, 10, _100_, 1000, 2147483647
-# eliminateocclim 0, 1000, _2000_, 3000, 2147483647
-# eliminaterounds 1, _2_, 4, 8, 16, 32, 10000
-# emafast 10, 20, _33_, 40, 50, 100, 1000000
-# emaslow 100, 50000, 75000, _100000_, 125000, 150000, 1000000
-# mineffort 0, 5, _10_, 15, 20, 2147483647
-# minimizedepth 1, 10, 100, _1000_, 10000, 1000000
-# modeinit 10, 100, _1000_, 10000, 100000, 100000000
-# reducefraction 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, _75_, 80, 85, 90, 95, 100
-# reluctantint 2, 256, 512, _1024_, 2048, 4096, 32768
-# reluctantlim 0, 65536, 262144, _1048576_, 4194304, 16777216, 1073741824
-# restartint _1_, 2, 5, 10, 25, 50, 100, 1000, 10000
-# restartmargin 0, 5, _10_, 15, 20, 25
-# substituteeffort 1, 2, 4, _10_, 16, 32, 64, 1000
-# substituterounds 1, _2_, 4, 8, 16, 32, 64, 100
-# subsumeclslim 1, 10, 100, _1000_, 10000, 2147483647
-# subsumeocclim 0, 1, 10, 100, _1000_, 10000, 2147483647
-# sweepclauses 0, 256, 512, _1024_, 2048, 4096, 2147483647
-# sweepdepth 0, _1_, 2, 3, 4, 5, 2147483647
-# sweepeffort 0, 5, _10_, 15, 20, 100, 10000
-# sweepfliprounds 0, _1_, 2, 3, 4, 5, 10, 100, 2147483647
-# sweepmaxclauses 2, 1024, 2048, _4096_, 8192, 16384, 2147483647
-# sweepmaxdepth 1, _2_, 3, 4, 5, 10, 2147483647
-# sweepvars 0, 1, 2, 4, 8, 16, 32, 64, _128_
-# tier1 1, _2_, 3, 4, 5, 6, 7, 8, 9, 10, 100
-# tier2 1, 2, 3, 4, 5, _6_, 7, 8, 9, 10, 100, 1000
-# vivifytier1 1, 2, _3_, 4, 5, 6, 7, 8, 9, 10, 100
-# vivifytier2 1, 2, 3, 4, 5, _6_, 7, 8, 9, 10, 100
-
-#
-dm_params = ['backbone', 'definitioncores', 'eliminatebound', 'emafast', 'mineffort',\
-  'minimizedepth', 'modeinit', 'otfs', 'restartint', 'stable', 'substituterounds', 'subsumeclslim',\
-  'sweepclauses', 'sweepmaxclauses', 'sweepmaxdepth', 'sweepvars', 'target']
+parameters_to_skip = ['statistics', 'verbose', 'quiet', 'profile', \
+  'flushproof', \
+  'seed', \
+  'randec', 'randecfocused','randeclength', 'randecstable', \
+  'backboneeffort', 'eliminateeffort', 'eliminateinit', \
+  'eliminateint', 'forwardeffort', 'probeinit', 'probeint', \
+  'randecinit', 'randecint', 'reduceinit', 'reduceint', 'rephaseinit', \
+  'rephaseint', 'sweepeffort', 'transitiveeffort', 'vivifyeffort', \
+  'vivifyirred', 'walkeffort', 'walkinitially',
+  'ands', 'bump', 'bumpreasons', 'compact', 'chrono', 'equivalences', \
+  'extract', 'forward', 'ifthenelse', 'minimize', 'minimizeticks', 'otfs', \
+  'phasesaving', 'probe', 'promote', 'reduce', 'reluctant', 'rephase', \
+  'restart', 'transitive', 'transitivekeep', 'tumble', 'vivify', 'warmup', \
+  'backbonemaxrounds', 'definitions', 'defragsize', 'defraglim', 'eliminate', \
+  'forcephase', 'incremental', 'phase', 'simplify', 'substitute', 'sweep', \
+  'sweepmaxvars']
 
 class Param:
   name = ''
@@ -105,7 +103,7 @@ def if_parameter_str(s : str, substr : str):
   return False
 
 # Read SAT solver's parameters.
-def read_solver_parameters(param_file_name : str, isDm : bool):
+def read_solver_parameters(param_file_name : str):
   params = []
   with open(param_file_name, 'r') as param_file:
     lines = param_file.read().splitlines()
@@ -156,140 +154,36 @@ def read_solver_parameters(param_file_name : str, isDm : bool):
       assert(isinstance(p.default, int))
       assert(p.left_bound < p.right_bound)
       assert(p.right_bound > 0)
-      if isDm == True and p.name not in dm_params:
-        print('Skip non-dm parameter')
-        continue
       params.append(p)
   assert(len(params) > 0)
   return params
 
-# Convert to string a given list of values:
-def domain_to_str(name : str, default : int, values : list):
-  assert(name != '')
-  assert(len(values) > 0)
-  s = name + ' {'
-  if values == ['false', 'true']:
-    default_bool = 'true' if default == 1 else 'false'
-    s += 'false, true}[' + default_bool + ']'
-    return s
-  assert(default in values)
-  for i in values:
-    s += str(i)
-    if i != values[-1]:
-      s += ', '
-  s += '}[' + str(default) + ']'
-  return s
-
-def set_values(params : list):
-  # Convert each parameter to the PCS format:
-  values_num = 0
-  pcs_str = ''
-  for p in params:
-    # Manually chosen values:
-    if p.name == 'backbonerounds':
-      values = [1, 10, 100, 1000]
-    elif p.name == 'bumpreasonsrate':
-      values = [1, 2, 4, 8, 10, 16, 32, 64, 128, 256, 512, 2147483647]
-    elif p.name == 'bumpreasonslimit':
-      values = [1, 2, 4, 8, 10, 16, 32, 64, 128, 256, 512, 2147483647]
-    elif p.name == 'chronolevels':
-      values = [0, 10, 100, 1000, 2147483647]
-    elif p.name == 'definitionticks':
-      values = [0, 100, 10000, 1000000, 100000000, 2147483647]
-    elif p.name == 'defragsize':
-      values = [10, 2048, 262144, 16777216, 2147483647]
-    elif p.name == 'eliminateclslim':
-      values = [1, 10, 100, 1000, 2147483647]
-    elif p.name == 'eliminateocclim':
-      values = [0, 1000, 2000, 4000, 2147483647]
-    elif p.name == 'eliminaterounds':
-      values = [1, 2, 4, 8, 16, 32, 10000]
-    elif p.name == 'emafast':
-      values = [10, 20, 33, 40, 50, 100, 1000000]
-    elif p.name == 'emaslow':
-      values = [100, 50000, 75000, 100000, 125000, 150000, 1000000]
-    elif p.name == 'mineffort':
-      values = [0, 5, 10, 15, 20, 2147483647]
-    elif p.name == 'minimizedepth':
-      values = [1, 10, 100, 1000, 10000, 1000000]
-    elif p.name == 'modeinit':
-      values = [10, 100, 1000, 10000, 100000, 100000000]
-    elif p.name == 'reducefraction':
-      values = [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100]
-    elif p.name == 'reluctantint':
-      values = [2, 256, 512, 1024, 2048, 4096, 32768]
-    elif p.name == 'reluctantlim':
-      values = [0, 65536, 262144, 1048576, 4194304, 16777216, 1073741824]
-    elif p.name == 'restartint':
-      values = [1, 2, 5, 10, 25, 50, 100, 1000, 10000]
-    elif p.name == 'restartmargin':
-      values = [0, 5, 10, 15, 20, 25]
-    elif p.name == 'substituteeffort':
-      values = [1, 2, 4, 10, 16, 32, 64, 1000]
-    elif p.name == 'substituterounds':
-      values = [1, 2, 4, 8, 16, 32, 64, 100]
-    elif p.name == 'subsumeclslim':
-      values = [1, 10, 100, 1000, 10000, 2147483647]
-    elif p.name == 'subsumeocclim':
-      values = [0, 1, 10, 100, 1000, 10000, 2147483647]
-    elif p.name == 'sweepclauses':
-      values = [0, 256, 512, 1024, 2048, 4096, 2147483647]
-    elif p.name == 'sweepdepth':
-      values = [0, 1, 2, 3, 4, 5, 2147483647]
-    elif p.name == 'sweepeffort':
-      values = [0, 5, 10, 15, 20, 100, 10000]
-    elif p.name == 'sweepfliprounds':
-      values = [0, 1, 2, 3, 4, 5, 10, 100, 2147483647]
-    elif p.name == 'sweepmaxclauses':
-      values = [2, 1024, 2048, 4096, 8192, 16384, 2147483647]
-    elif p.name == 'sweepmaxdepth':
-      values = [1, 2, 3, 4, 5, 10, 2147483647]
-    elif p.name == 'sweepvars':
-      values = [0, 1, 2, 4, 8, 16, 32, 64, 128]
-    elif p.name == 'tier1':
-      values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100]
-    elif p.name == 'tier2':
-      values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100, 1000]
-    elif p.name == 'vivifytier1':
-      values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100]
-    elif p.name == 'vivifytier2':
-      values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100]
-    # If Boolean:
-    elif p.left_bound == 0 and p.right_bound == 1:
-      values = ['false', 'true']
-    # If integer with few values:
-    elif int(p.right_bound) - int(p.left_bound) < 10: # e.g. [0,9] or [11,20]
-      values = [i for i in range(p.left_bound, p.right_bound + 1)]
-    # If integer with too many values, use logariphmic steps:
-    else:
-      koef = 2 if int(p.right_bound) - int(p.left_bound) <= 100000 else 4
-      values = [p.left_bound]
-      i = p.left_bound
-      while values[-1] != p.right_bound:
-        if i < 0:
-          i *= -1 / koef
-        elif i == 0:
-          i = 1
-        else:
-          i *= koef
-        if i >= p.right_bound:
-          values.append(p.right_bound)
-          break
-        values.append(i)
-      if p.default not in values:
-        values.append(p.default)
-      values = sorted(values)
-    pcs_str += domain_to_str(p.name, p.default, values)
-    pcs_str += '\n'
-    values_num += len(values)
-  # end of for p in params:
-  return values_num, pcs_str
+# Convert a given list of values to string:
+def domains_to_str(params : list):
+   res_str = ''
+   for p in params:
+      s = p.name + ' {'
+      values_len = p.right_bound - p.left_bound + 1
+      if p.left_bound == 0 and p.right_bound == 1:
+         assert(values_len == 2)
+         assert(p.default == 0 or p.default == 1)
+         default_bool_str = 'true' if p.default == 1 else 'false'
+         s += 'false, true}[' + default_bool_str + ']'
+      elif values_len < MIN_DOMAIN_LEN_LOG_MODE:
+        for i in range(p.left_bound, p.right_bound + 1):
+          s += str(i)
+          if i != p.right_bound:
+            s += ', '
+        s += '}[' + str(p.default) + ']i'
+      else:
+        assert(values_len >= MIN_DOMAIN_LEN_LOG_MODE)
+        s += str(p.left_bound) + ', ' + str(p.right_bound) + '}[' + \
+          str(p.default) + ']il'
+      res_str += s + '\n'
+   return res_str
 
 def print_usage():
-  print('Usage : ' + script_name + ' solver-parameters [Options]')
-  print('  Options :\n' +\
-  '  --dm    - reduced parameters space for the dm problems.' + '\n')
-
+  print('Usage : ' + script_name + ' solver-parameters')
 
 if __name__ == '__main__':
 
@@ -298,15 +192,10 @@ if __name__ == '__main__':
     exit(1)
 
   param_file_name = sys.argv[1]
-  isDm = False
-  if len(sys.argv) > 2 and sys.argv[2] == '--dm':
-    isDm = True
-  params = read_solver_parameters(param_file_name, isDm)
-  #print(str(len(params)) + ' params')
+  params = read_solver_parameters(param_file_name)
+  print(str(len(params)) + ' parameters where read')
 
-  values_num, pcs_str = set_values(params)
-
-  print('\n ' + str(values_num) + ' values in ' + str(len(params)) + ' domains')
+  pcs_str = domains_to_str(params)
 
   # Report results:
   pcs_file_name = param_file_name + '.pcs'
