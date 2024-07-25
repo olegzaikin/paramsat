@@ -11,8 +11,10 @@
 #==============================================================================
 
 script_name = "convert_to_pcs.py"
-version = '0.3.1'
+version = '0.3.2'
 MIN_DOMAIN_LEN_LOG_MODE = 11
+MAX_RIGHT_BOUND = 2147483647
+DEFAULT_RIGHT_BOUND = 5
 
 import sys
 
@@ -158,12 +160,26 @@ def read_solver_parameters(param_file_name : str):
   assert(len(params) > 0)
   return params
 
+# Decrease too high right bounds:
+def update_right_bounds(params : list):
+    upd_params = params
+    for p in upd_params:
+       if p.right_bound == 2147483647:
+          if p.default == 0 or p.default == 1:
+             p.right_bound = DEFAULT_RIGHT_BOUND
+          else:
+            p.right_bound = p.default*p.default
+       if p.right_bound > MAX_RIGHT_BOUND:
+          p.right_bound = MAX_RIGHT_BOUND
+    return upd_params
+
 # Convert a given list of values to string:
 def domains_to_str(params : list):
    res_str = ''
    for p in params:
       s = p.name + ' '
       values_len = p.right_bound - p.left_bound + 1
+      #print(p.name + ' ' + str(values_len))
       if p.left_bound == 0 and p.right_bound == 1:
          assert(values_len == 2)
          assert(p.default == 0 or p.default == 1)
@@ -198,6 +214,8 @@ if __name__ == '__main__':
   param_file_name = sys.argv[1]
   params = read_solver_parameters(param_file_name)
   print(str(len(params)) + ' parameters where read')
+
+  params = update_right_bounds(params)
 
   pcs_str = domains_to_str(params)
 
