@@ -7,13 +7,15 @@
 # Given a SMAC3's output, convert the final point to the PCS format.
 #
 # Example:
-#   python3 ./smac_point_to_pcs.py out_smac
+#   python3 ./smac_point_to_pcs.py out_smac param.pcs
 #==============================================================================
 
-script_name = "convert_to_pcs.py"
-version = '0.0.1'
+script_name = "smac_point_to_pcs.py"
+version = '0.0.2'
 
 import sys
+
+solver = 'kissat3.1.1'
 
 if len(sys.argv) < 3 or sys.argv[1] == '-h' or sys.argv[1] == '--help':
   print('Usage : ' + script_name + ' out-smac psc-file')
@@ -46,7 +48,15 @@ with open(out_smac, "r") as f:
       print(param_name + ' ' + param_value)
       param_str += '--' + param_name + '=' + param_value + ' '
 
-print('solver=\"kissat3.1.1 ' + param_str[:-1] + '\"')
+solver_param_str = 'solver=\"' + solver + ' ' + param_str[:-1] + '\"'
+print(solver_param_str)
+
+bash_exec_fname = './' + solver + '_param.sh'
+print('Writing to file ' + bash_exec_fname)
+with open(bash_exec_fname, 'w') as ofile:
+    ofile.write('cnf=$1\n')
+    ofile.write(solver_param_str + '\n')
+    ofile.write('$solver $cnf\n')
 
 is_start_parsing = False
 param_str = ''
@@ -69,6 +79,7 @@ with open(pcs_fname, "r") as pcs_f:
 
 assert('.pcs' in pcs_fname)
 new_pcs_fname = pcs_fname.split('.pcs')[0] + '_upd.pcs'
+print('Writing to file ' + new_pcs_fname)
 with open(new_pcs_fname, 'w') as new_pcs_f:
   for line in new_pcs_lines:
     new_pcs_f.write(line + '\n')
