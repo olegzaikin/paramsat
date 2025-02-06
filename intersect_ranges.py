@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-# Created on: 27 Jan 2024
+# Created on: 27 Jan 2025
 # Author: Oleg Zaikin
 # E-mail: zaikin.icc@gmail.com
 #
@@ -10,10 +10,10 @@
 #
 # Example:
 #   kissat3 --range > range3 && kissat4 --range > range4
-#   python3 ./intersect_params.py ./range3 ./range4
+#   python3 ./intersect_ranges.py ./range3 ./range4
 #==============================================================================
 
-script_name = "intersect_params.py"
+script_name = "intersect_ranges.py"
 version = '0.0.1'
 
 import sys
