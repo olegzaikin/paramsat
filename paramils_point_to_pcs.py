@@ -11,7 +11,7 @@
 #==============================================================================
 
 script_name = "paramils_point_to_pcs.py"
-version = '0.0.1'
+version = '0.0.2'
 
 import sys
 
@@ -30,6 +30,7 @@ print('pcs_fname : ' + pcs_fname)
 
 param_str = ''
 param_dict = dict()
+values = []
 with open(out_paramils, "r") as f:
   lines = f.read().splitlines()
   for line in lines:
@@ -41,9 +42,17 @@ with open(out_paramils, "r") as f:
         param_name = word.split('=')[0]
         param_value = word.split('=')[1]
         param_dict[param_name] = param_value
+        values.append(param_value)
         #print(param_name + ' ' + param_value)
         param_str += '--' + param_name + '=' + param_value + ' '
       break
+
+s = ''
+for val in values[:-1]:
+    s += str(val) + ', '
+s += str(values[-1])
+print('Values :')
+print(s)
 
 solver_param_str = 'solver=\"' + solver + ' ' + param_str[:-1] + '\"'
 print(solver_param_str)
