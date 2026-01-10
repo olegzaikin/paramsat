@@ -41,7 +41,7 @@ def print_usage():
   '  -pointsfile=<string>   - (default : "")    path to a file with points' + '\n' +\
   '  -origpcsfile=<string>  - (default : "")    path to the original parameters file' + '\n' +\
   '  -cpunum=<int>          - (default : 1)     number of used CPU cores' + '\n' +\
-  '  -seed=<int>            - (default : time)  seed for pseudorandom generator' + '\n' +\
+  '  -seed=<int>            - (default : 0)     seed for pseudorandom generator' + '\n' +\
   '  --solving              - (default : off)   solving mode' + '\n\n' +\
   'Points from the -pointsfile are used along with those which are generated.')
 
@@ -63,7 +63,7 @@ class Options:
 		self.points_file = ''
 		self.origpcs_file = ''
 		self.cpu_num = 1
-		self.seed = round(time.time() * 1000)
+		self.seed = 0
 		self.is_solving = False
 	def __str__(self):
 		s = 'def_point_time  : ' + str(self.def_point_time) + '\n' +\
@@ -396,6 +396,7 @@ def collect_result(res):
   command = res[4]
   print('PAR10 time in collect_result : ' + str(par10_time) + ' seconds')
   print('max_time : ' + str(max_time) + ' seconds')
+  # If a new record point is found:
   if is_all_sat == True and (par10_time < best_sum_time or best_sum_time <= 0):
     is_updated = True
     updates_num += 1
