@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.8.5'
+version = '0.8.6'
 
 import sys
 import glob
@@ -37,7 +37,8 @@ def print_usage():
   print('  Options :\n' +\
   '  -defobj=<float>        - (default : -1)    objective funtion value for the default point' + '\n' +\
   '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
-  '  -maxtime=<int>         - (default : 86400) maximum time' + '\n' +\
+  '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
+  '  -maxsolvertime=<int>   - (default : -1)    maximum SAT solver runtime' + '\n' +\
   '  -pointsfile=<string>   - (default : "")    path to a file with points' + '\n' +\
   '  -origpcsfile=<string>  - (default : "")    path to the original parameters file' + '\n' +\
   '  -cpunum=<int>          - (default : 1)     number of used CPU cores' + '\n' +\
@@ -50,6 +51,7 @@ class Options:
 	def_point_time = -1
 	max_points = 1000
 	max_time = -1
+	max_solver_time = -1
 	points_file = ''
 	defpcs_file = ''
 	cpu_num = 1
@@ -57,9 +59,9 @@ class Options:
 	is_solving = False
 	def __init__(self):
 		self.def_point_time = -1
-		self.solvertimelim = -1
 		self.max_points = 1000
 		self.max_time = 86400
+		self.max_solver_time = -1
 		self.points_file = ''
 		self.origpcs_file = ''
 		self.cpu_num = 1
@@ -69,6 +71,7 @@ class Options:
 		s = 'def_point_time  : ' + str(self.def_point_time) + '\n' +\
 		'max_points      : ' + str(self.max_points) + '\n' +\
 		'max_time        : ' + str(self.max_time) + '\n' +\
+		'max_solver_time : ' + str(self.max_solver_time) + '\n' +\
 		'points_file     : ' + str(self.points_file) + '\n' +\
 		'origpcs_file    : ' + str(self.origpcs_file) + '\n' +\
 		'cpu_num         : ' + str(self.cpu_num) + '\n' +\
@@ -83,6 +86,8 @@ class Options:
 				self.max_points = math.ceil(float(p.split('-maxpoints=')[1]))
 			if '-maxtime=' in p:
 				self.max_time = math.ceil(float(p.split('-maxtime=')[1]))
+			if '-maxsolvertime=' in p:
+				self.max_solver_time = math.ceil(float(p.split('-maxsolvertime=')[1]))
 			if '-pointsfile=' in p:
 				self.points_file = p.split('-pointsfile=')[1]
 			if '-origpcsfile=' in p:
@@ -629,7 +634,7 @@ if __name__ == '__main__':
   skipped_impos_num = 0
   updates_num = 0
   iter = 0
-  max_instance_time_best_point = -1
+  max_instance_time_best_point = op.max_solver_time
   is_extern_break = False
   elapsed_time = 0
 
