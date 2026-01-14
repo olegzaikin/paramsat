@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.8.6'
+version = '0.9.0'
 
 import sys
 import glob
@@ -29,22 +29,19 @@ import copy
 import math
 import statistics
 import string
+from enum import Enum
 from datetime import datetime
 import multiprocessing as mp
 
-def print_usage():
-  print('Usage : ' + script_name + ' solver solver-parameters cnfs-folder [Options]')
-  print('  Options :\n' +\
-  '  -defobj=<float>        - (default : -1)    objective funtion value for the default point' + '\n' +\
-  '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
-  '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
-  '  -maxsolvertime=<int>   - (default : -1)    maximum SAT solver runtime' + '\n' +\
-  '  -pointsfile=<string>   - (default : "")    path to a file with points' + '\n' +\
-  '  -origpcsfile=<string>  - (default : "")    path to the original parameters file' + '\n' +\
-  '  -cpunum=<int>          - (default : 1)     number of used CPU cores' + '\n' +\
-  '  -seed=<int>            - (default : 0)     seed for pseudorandom generator' + '\n' +\
-  '  --solving              - (default : off)   solving mode' + '\n\n' +\
-  'Points from the -pointsfile are used along with those which are generated.')
+# A new best point must be at least 2% better than the current best point:
+KOEF_NEW_BEST_POINT = 0.98
+
+class PointStatus(Enum):
+    GENERATED = 0 # a point is generated
+    STARTED = 1 # a point is generated and the calculation is started on it
+    FINISHED = 2 # a point is calculated on all instances
+    INTERRUPTED = 3 # a point is calculated, but at least one instances the SAT solver was interrupted
+    UNFINISHED = 4 # a calculation is unfinished because of new best point 
 
 # Input options:
 class Options:
@@ -110,6 +107,20 @@ class Param:
     self.default = -1
     self.values = []
 
+def print_usage():
+  print('Usage : ' + script_name + ' solver solver-parameters cnfs-folder [Options]')
+  print('  Options :\n' +\
+  '  -defobj=<float>        - (default : -1)    objective funtion value for the default point' + '\n' +\
+  '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
+  '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
+  '  -maxsolvertime=<int>   - (default : -1)    maximum SAT solver runtime' + '\n' +\
+  '  -pointsfile=<string>   - (default : "")    path to a file with points' + '\n' +\
+  '  -origpcsfile=<string>  - (default : "")    path to the original parameters file' + '\n' +\
+  '  -cpunum=<int>          - (default : 1)     number of used CPU cores' + '\n' +\
+  '  -seed=<int>            - (default : 0)     seed for pseudorandom generator' + '\n' +\
+  '  --solving              - (default : off)   solving mode' + '\n\n' +\
+  'Points from the -pointsfile are used along with those which are generated.')
+
 # Convert string to int if not Boolean:
 def convert_if_int(x : str):
   if x in ['true', 'false']:
@@ -169,14 +180,20 @@ def parse_cdcl_result(cdcl_log : str):
 	return t, sat
 
 # Kill a solver:
-def kill_solver(solver : str, num : int):
+def kill_solver(solver : str, generated_points : dict):
   assert(solver != '')
-  assert(num >= 1)
-  print('Killing solver ' + solver + ' ' + str(num) + ' times')
+  # Mark all currently calculated points as unfinished to let them finish later:
+  new_unfinished_num = 0
+  for point_tuple in generated_points:
+     if generated_points[point_tuple] == PointStatus.STARTED:
+        generated_points[point_tuple] = PointStatus.UNFINISHED
+        new_unfinished_num += 1
+  print('Marked ' + str(new_unfinished_num) + ' started points as unfinished')
+  # Form a command line to kill all solver species:
+  print('Killing solver ' + solver)
   sys_str = 'killall -9 ' + solver.replace('./','')
-  for _ in range(num):
-    o = os.popen(sys_str).read()
-    time.sleep(1)
+  o = os.popen(sys_str).read()
+  time.sleep(1)
 
 # Create a copy of a given solver to kill the latter safely:
 def create_solver_copy(solver_name : str, random_str : str):
@@ -261,20 +278,21 @@ def possibcomb(new_point : list, def_point : list, params : list, paramsdict : d
   return True
 
 # Generate new points via (1+1)-EA:
-def oneplusone(point : list, params : list, paramsdict : dict, points_num : int):
+def oneplusone(point : list, params : list, paramsdict : dict, \
+               points_num_to_gen : int, generated_points : dict):
   assert(len(point) == len(params))
-  assert(points_num >= 0)
+  assert(points_num_to_gen >= 0)
   global random
-  global generated_points_strings
   global def_point
-  global skipped_repeat_num
+  global skipped_points_num
   global skipped_impos_num
-  if points_num == 0:
+  global repeatedly_generated_points
+  if points_num_to_gen == 0:
     return []
   new_points = []
   probability = 1/len(params)
   # Change each value with probability:
-  while len(new_points) < points_num:
+  while len(new_points) < points_num_to_gen:
     pnt = copy.deepcopy(point)
     for i in range(len(params)):
       prob = random.random()
@@ -289,13 +307,22 @@ def oneplusone(point : list, params : list, paramsdict : dict, points_num : int)
       skipped_impos_num += 1
       print(str(skipped_impos_num) + ' impossible points skipped')
       continue
-    # If point has been already processed:
-    if strlistrepr(pnt) in generated_points_strings:
-      skipped_repeat_num += 1
-      #print(str(skipped_repeat_num) + ' repeated points skipped')
+    point_tuple = tuple(pnt)
+    # If point has been already generated:
+    if point_tuple in generated_points:
+      # If point was already generated but calculation is unfinished:
+      if generated_points[point_tuple] == PointStatus.UNFINISHED:
+        # Change the status to 'generated' to finish the calculation:
+        generated_points[point_tuple] = PointStatus.GENERATED
+        repeatedly_generated_points += 1
+        new_points.append(pnt)
+      else:
+        # The calculation is finished or the point is just generated:
+        skipped_points_num += 1
+        #print(str(skipped_points_num) + ' repeated points skipped')
     else:
       # New point and possible combination:
-      generated_points_strings.add(strlistrepr(pnt))
+      generated_points[point_tuple] = PointStatus.GENERATED
       new_points.append(pnt)
   return new_points
 
@@ -315,23 +342,22 @@ def points_diff(p1 : list, p2 : list, params : list):
   return s0 + s[:-1]
 
 # Run solver on a given point:
-def calc_obj(solver_name : str, sum_time : float, \
-  max_instance_time_best_point : float,  cnfs : list, \
+def calc_obj(solver_name : str, best_sum_time : float, \
+  max_instance_time_best_point : float, cnfs : list, \
   params : list, point : list, is_solving : bool):
   assert(len(params) > 1)
   assert(len(params) == len(point))
   assert(len(cnfs) > 0)
-  par10_time = 0.0
+  cur_sum_time = 0.0
   max_time = -1
   is_all_sat = True
   # Solver's time limit on each CNF is the current best obj func value:
   if max_instance_time_best_point > 0:
     solver_time_lim = max_instance_time_best_point
   else:
-    solver_time_lim = sum_time
-  print('solver_time_lim : ' + str(solver_time_lim))
-  # Calculate PAR10 for the solver runtimes: sum(time if solved in lim seconds,
-  # otherwise lim*10)
+    solver_time_lim = best_sum_time
+  #print('solver_time_lim : ' + str(solver_time_lim))
+  # Calculate sum for the solver runtimes:
   cnf_num = 0
   sat_num = 0
   for cnf_file_name in cnfs:
@@ -349,16 +375,18 @@ def calc_obj(solver_name : str, sum_time : float, \
     t, sat = parse_cdcl_result(cdcl_log)
     assert(t > 0)
     assert(sat == -1 or sat == 1)
-    if sat == 1:
-       sat_num += 1
+    # If the solver is interrupted at least once,
     if sat == -1 or (solver_time_lim > 0 and t >= solver_time_lim):
-      par10_time += solver_time_lim * 10
+      # interrupt calculation and set obj func value to -1 (INTERRUPTED):
+      cur_sum_time = -1
+      break
     else:
       assert(sat == 1) # SAT should be here
+      sat_num += 1
       # Only if a CNF is solved in time limit:
-      par10_time += t
+      cur_sum_time += t
       max_time = t if max_time < t else max_time
-      print('Time : ' + str(t) + ' on CNF ' + cnf_file_name)
+      #print('Time : ' + str(t) + ' on CNF ' + cnf_file_name)
       # In solving mode, the CDCL solver's log should be saved:
       if is_solving:
         assert('.cnf' in cnf_file_name)
@@ -369,17 +397,18 @@ def calc_obj(solver_name : str, sum_time : float, \
         with open(cdcl_log_file_name, 'w') as f:
           f.write(cdcl_log)
     # If current value is already worse than the best one:
-    print('sum_time : ' + str(sum_time))
-    print('par10_time : ' + str(par10_time))
-    if sum_time > 0 and par10_time >= sum_time:
-      print('Current value ' + str(par10_time) + ' is already worse than ' + str(sum_time))
+    #print('sum_time : ' + str(best_sum_time))
+    #print('cur_sum_time : ' + str(cur_sum_time))
+    if cnf_num < len(cnfs) and best_sum_time > 0 and cur_sum_time >= best_sum_time*KOEF_NEW_BEST_POINT:
+      print('Current obj func value ' + str(cur_sum_time) + ' is already worse than ' + str(best_sum_time))
       print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
       break
+  # end of loop 'for cnf_file_name in cnfs'
   is_all_sat = False
   if sat_num == len(cnfs):
-     is_all_sat = True
-  #print('PAR10 in calc_obj : ' + str(par10_time))
-  return point, par10_time, max_time, is_all_sat, sys_str
+    is_all_sat = True
+  #print('Obj func value : ' + str(cur_sum_time))
+  return point, cur_sum_time, max_time, is_all_sat, sys_str
 
 # Collect a result produced by solver:
 def collect_result(res):
@@ -390,27 +419,43 @@ def collect_result(res):
   global max_instance_time_best_point
   global def_point
   global params
-  global processed_points_num
   global start_time
   global is_updated
+  global generated_points
   assert(len(res) == 5)
   point = res[0]
-  par10_time = res[1]
+  cur_sum_time = res[1]
   max_time = res[2]
   is_all_sat = res[3]
   command = res[4]
-  print('PAR10 time in collect_result : ' + str(par10_time) + ' seconds')
-  print('max_time : ' + str(max_time) + ' seconds')
+  # If interrupted, then not all instances are satisfiable:
+  assert(cur_sum_time > 0 or (cur_sum_time < 0 and not is_all_sat))
+  #print('Sum time in collect_result : ' + str(cur_sum_time) + ' seconds')
+  #print('max_time : ' + str(max_time) + ' seconds')
+  tuple_point = tuple(point)
+  # Check that processing of the point has been started:
+  # If all CNFs are processed, mark the point as 'finished':
+  if is_all_sat == True:
+    assert(generated_points[tuple_point] == PointStatus.STARTED)
+    generated_points[tuple_point] = PointStatus.FINISHED
+  else:
+    assert(generated_points[tuple_point] == PointStatus.STARTED or generated_points[tuple_point] == PointStatus.UNFINISHED)
+    # If a new best point is found and all current points are interrupted by killing their solvers,
+    # then these points already have the status 'unfinished', so do not change their status here.
+    # Otherwise, the status is changed:
+    if generated_points[tuple_point] == PointStatus.STARTED:
+      generated_points[tuple_point] = PointStatus.INTERRUPTED
   # If a new record point is found:
-  if is_all_sat == True and (par10_time < best_sum_time or best_sum_time <= 0):
+  if (is_all_sat == True and cur_sum_time > 0) and (cur_sum_time < best_sum_time*KOEF_NEW_BEST_POINT or best_sum_time <= 0):
     is_updated = True
     updates_num += 1
-    best_sum_time = par10_time
+    best_sum_time = cur_sum_time
     best_point = copy.deepcopy(point)
     best_command = command
     max_instance_time_best_point = max_time
     elapsed_time = round(time.time() - start_time, 2)
-    print('\nUpdated best sum time : ' + str(best_sum_time))
+    print('')
+    print('Updated best sum time : ' + str(best_sum_time))
     print('max_instance_time_best_point : ' + str(max_instance_time_best_point))
     print('elapsed : ' + str(elapsed_time) + ' seconds')
     print(points_diff(def_point, best_point, params))
@@ -435,7 +480,7 @@ def strlistrepr(lst : list):
   return s
 
 # Writed generated points to a file:
-def write_points(points : list, cnfs : list):
+def write_points(points : dict, cnfs : list):
   out_name = 'generated_points'
   #cleared_cnfs = []
   #for x in cnfs:
@@ -485,6 +530,39 @@ def write_final_pcs(best_point : list, params : list, cnfs : list):
         ofile.write(str(v) + ', ')
       ofile.write(str(params[i].values[-1]) + '}')
       ofile.write('[' + str(best_point[i]) + ']\n')
+
+def processed(generated_points : dict):
+  res = 0
+  for point_tuple in generated_points:
+     if generated_points[point_tuple] == PointStatus.FINISHED or \
+     generated_points[point_tuple] == PointStatus.INTERRUPTED:
+        res += 1
+  return res
+
+def stat(generated_points : dict):
+  res = ''
+  generated_num = 0
+  started_num = 0
+  finished_num = 0
+  interrupted_num = 0
+  unfinished_num = 0
+  for point_tuple in generated_points:
+      if generated_points[point_tuple] == PointStatus.GENERATED:
+         generated_num += 1
+      elif generated_points[point_tuple] == PointStatus.STARTED:
+         started_num += 1
+      elif generated_points[point_tuple] == PointStatus.FINISHED:
+         finished_num += 1
+      elif generated_points[point_tuple] == PointStatus.INTERRUPTED:
+         interrupted_num += 1
+      elif generated_points[point_tuple] == PointStatus.UNFINISHED:
+         unfinished_num += 1
+  res = str(generated_num) + ' generated\n' + \
+    str(started_num) + ' started\n' + \
+    str(finished_num) + ' finished\n' + \
+    str(interrupted_num) + ' interrupted\n' + \
+    str(unfinished_num) + ' unfinished\n'
+  return res
 
 # Main function:
 if __name__ == '__main__':
@@ -580,15 +658,16 @@ if __name__ == '__main__':
   print('Elapsed : ' + str(elapsed_time) + ' seconds')
 
   processed_points_num = 0
-  generated_points_strings = set()
+  # A dictionary of generated points, where a tuple representation of the
+  # point's parameters values is an ID, while the VALUE is a point's status:
+  generated_points = dict()
   start_points = []
 
-  
   start_points.append(def_point)
   # In runtime on default point is given, mark it as generated and processed:
   if default_sum_time > 0:
     processed_points_num = 1 # the default point is processed
-    assert(len(generated_points_strings) == 1)
+    assert(len(generated_points) == 1)
     assert(default_sum_time > 0)
   # If default point's runtime is not given, generate default points:
   else:
@@ -630,8 +709,9 @@ if __name__ == '__main__':
     start_points = start_points[:op.cpu_num]
     print('start_points was reduced to ' + str(len(start_points)))
 
-  skipped_repeat_num = 0
+  skipped_points_num = 0
   skipped_impos_num = 0
+  repeatedly_generated_points = 0
   updates_num = 0
   iter = 0
   max_instance_time_best_point = op.max_solver_time
@@ -651,27 +731,34 @@ if __name__ == '__main__':
       for p in start_points:
         assert(len(p) == len(params))
         points_to_process.append(p)
-        generated_points_strings.add(strlistrepr(p))
-    oneplusone_points = oneplusone(best_point, params, paramsdict, op.cpu_num - len(points_to_process))
-    print('Generated ' + str(len(oneplusone_points)) + ' oneplusone points')
+        tuple_point = tuple(p)
+        generated_points[tuple_point] = PointStatus.GENERATED
+    oneplusone_points = oneplusone(best_point, params, paramsdict, op.cpu_num - len(points_to_process), generated_points)
     for p in oneplusone_points:
        assert(len(p) == len(params))
        points_to_process.append(p)
+    print(str(len(points_to_process)) + ' points to process')
+    print('of them generated ' + str(len(oneplusone_points)) + ' oneplusone points')
     assert(len(points_to_process) == op.cpu_num)
     pool = mp.Pool(op.cpu_num)
+    is_updated = False
+    # Start processing the first batch of points:
     for p in points_to_process:
       assert(len(p) == len(params))
+      # Check the point's status:
+      tuple_point = tuple(p)
+      assert(generated_points[tuple_point] == PointStatus.GENERATED)
+      # Mark that the calculation is started:
+      generated_points[tuple_point] = PointStatus.STARTED
       pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, p, op.is_solving), callback=collect_result)
-    is_updated = False
     is_inner_break = False
     # Repeat until a new record is found or the processed points limit is reached:
     while True:
       while len(pool._cache) >= op.cpu_num: # wait until any CPU core is free
         time.sleep(1)
-      processed_points_num += 1
-      print('processed_points_num : ' + str(processed_points_num))
       elapsed_time = round(time.time() - start_time, 2)
-      print('elapsed : ' + str(elapsed_time) + ' seconds')
+      processed_points_num = processed(generated_points)
+      print(str(processed_points_num) + ' points are processed;  elapsed : ' + str(elapsed_time) + ' seconds')
       if processed_points_num >= op.max_points:
         print('The limit on the number of points is reached, break.')
         is_inner_break = True
@@ -689,18 +776,20 @@ if __name__ == '__main__':
         is_inner_break = True
       if is_inner_break:
         print('Break inner loop.')
-        kill_solver(solver_name, len(cnfs))
+        kill_solver(solver_name, generated_points)
         time.sleep(1)
         assert(len(pool._cache) == 0)
-        assert(len(points_to_process) == op.cpu_num)
-        processed_points_num += op.cpu_num - 1
-        print('processed_points_num : ' + str(processed_points_num))
         pool.close()
         pool.join()
         break
       # A CPU core is free, so generate a new point and process it:
-      one_point_list = oneplusone(best_point, params, paramsdict, 1)
+      one_point_list = oneplusone(best_point, params, paramsdict, 1, generated_points)
       assert(len(one_point_list) == 1)
+      # Check the point's status:
+      tuple_point = tuple(one_point_list[0])
+      assert(generated_points[tuple_point] == PointStatus.GENERATED)
+      # Mark that the calculation is started:
+      generated_points[tuple_point] = PointStatus.STARTED
       pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, one_point_list[0], op.is_solving), callback=collect_result)
     if is_extern_break:
        print('Break main loop')
@@ -708,21 +797,25 @@ if __name__ == '__main__':
     iter += 1
 
   # Write generated points:
-  write_points(generated_points_strings, cnfs)
+  write_points(generated_points, cnfs)
 
   # Write final pcs file:
   write_final_pcs(best_point, params, cnfs)
 
   # Print statistics:
   elapsed_time = round(time.time() - start_time, 2)
-  print('\nElapsed : ' + str(elapsed_time) + ' seconds')
+  print('')
+  print('Elapsed : ' + str(elapsed_time) + ' seconds')
   print(str(iter) + ' iterations')
   print(str(updates_num) + " updates of best point")
-  print(str(skipped_repeat_num + skipped_impos_num) + ' skipped points, of them:')
-  print('  ' + str(skipped_repeat_num ) + ' repeated points')
+  print(str(skipped_points_num + skipped_impos_num) + ' skipped points, of them:')
+  print('  ' + str(skipped_points_num ) + ' repeated points')
   print('  ' + str(skipped_impos_num) + ' impossible-combination points')
-  print(str(len(generated_points_strings)) + ' generated points')
-  print(str(processed_points_num) + ' processed points')
+  print(str(len(generated_points)) + ' generated points')
+  print('of them ' + str(repeatedly_generated_points) + ' repeatedly generated points')
+  print('Current points statuses:')
+  print(stat(generated_points))
+  print('Final best max time : ' + str(max_instance_time_best_point))
   print('Final best sum time : ' + str(best_sum_time) + ' , so ' + \
     str(default_sum_time) + ' -> ' + str(best_sum_time))
   if updates_num > 0:
