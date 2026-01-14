@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.9.0'
+version = '0.9.1'
 
 import sys
 import glob
@@ -182,6 +182,7 @@ def parse_cdcl_result(cdcl_log : str):
 # Kill a solver:
 def kill_solver(solver : str, generated_points : dict):
   assert(solver != '')
+  print('Killing SAT solver ' + solver)
   # Mark all currently calculated points as unfinished to let them finish later:
   new_unfinished_num = 0
   for point_tuple in generated_points:
@@ -658,6 +659,7 @@ if __name__ == '__main__':
   print('Elapsed : ' + str(elapsed_time) + ' seconds')
 
   processed_points_num = 0
+  prev_processed_points_num = 0
   # A dictionary of generated points, where a tuple representation of the
   # point's parameters values is an ID, while the VALUE is a point's status:
   generated_points = dict()
@@ -758,7 +760,11 @@ if __name__ == '__main__':
         time.sleep(1)
       elapsed_time = round(time.time() - start_time, 2)
       processed_points_num = processed(generated_points)
-      print(str(processed_points_num) + ' points are processed;  elapsed : ' + str(elapsed_time) + ' seconds')
+      if processed_points_num % 100 == 0 and processed_points_num != prev_processed_points_num:
+        assert(processed_points_num > prev_processed_points_num)
+        print(str(processed_points_num) + ' points are processed;  elapsed : ' + str(elapsed_time) + ' seconds')
+        #print(stat(generated_points))
+        prev_processed_points_num = processed_points_num
       if processed_points_num >= op.max_points:
         print('The limit on the number of points is reached, break.')
         is_inner_break = True
@@ -776,8 +782,9 @@ if __name__ == '__main__':
         is_inner_break = True
       if is_inner_break:
         print('Break inner loop.')
-        kill_solver(solver_name, generated_points)
-        time.sleep(1)
+        while len(pool._cache) > 0:
+          kill_solver(solver_name, generated_points)
+          time.sleep(1)
         assert(len(pool._cache) == 0)
         pool.close()
         pool.join()
@@ -808,11 +815,12 @@ if __name__ == '__main__':
   print('Elapsed : ' + str(elapsed_time) + ' seconds')
   print(str(iter) + ' iterations')
   print(str(updates_num) + " updates of best point")
+  print(str(processed_points_num) + ' processed points')
   print(str(skipped_points_num + skipped_impos_num) + ' skipped points, of them:')
   print('  ' + str(skipped_points_num ) + ' repeated points')
   print('  ' + str(skipped_impos_num) + ' impossible-combination points')
-  print(str(len(generated_points)) + ' generated points')
-  print('of them ' + str(repeatedly_generated_points) + ' repeatedly generated points')
+  print(str(len(generated_points)) + ' generated points, of them:')
+  print('  ' + str(repeatedly_generated_points) + ' repeatedly generated points')
   print('Current points statuses:')
   print(stat(generated_points))
   print('Final best max time : ' + str(max_instance_time_best_point))
