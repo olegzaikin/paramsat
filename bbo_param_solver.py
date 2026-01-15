@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.9.1'
+version = '0.9.2'
 
 import sys
 import glob
@@ -303,10 +303,10 @@ def oneplusone(point : list, params : list, paramsdict : dict, \
         assert(pnt != point)
     # Check if point is impossible combination:
     if not possibcomb(pnt, def_point, params, paramsdict):
-      print('Impossible combination:')
-      print(strlistrepr(pnt))
+      #print('Impossible combination:')
+      #print(strlistrepr(pnt))
       skipped_impos_num += 1
-      print(str(skipped_impos_num) + ' impossible points skipped')
+      #print(str(skipped_impos_num) + ' impossible points skipped')
       continue
     point_tuple = tuple(pnt)
     # If point has been already generated:
