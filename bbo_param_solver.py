@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.9.3'
+version = '0.9.4'
 
 import sys
 import glob
@@ -31,6 +31,9 @@ import string
 from enum import Enum
 from datetime import datetime
 import multiprocessing as mp
+
+# A new best point must be at least 1% better than the current best point:
+KOEF_NEW_BEST_POINT = 0.99
 
 class PointStatus(Enum):
     GENERATED = 0 # a point is generated
@@ -396,7 +399,7 @@ def calc_obj(solver_name : str, best_sum_time : float, \
     # If current value is already worse than the best one:
     #print('sum_time : ' + str(best_sum_time))
     #print('cur_sum_time : ' + str(cur_sum_time))
-    if cnf_num < len(cnfs) and best_sum_time > 0 and cur_sum_time >= best_sum_time:
+    if cnf_num < len(cnfs) and best_sum_time > 0 and cur_sum_time >= best_sum_time*KOEF_NEW_BEST_POINT:
       print('Current obj func value ' + str(cur_sum_time) + ' is already worse than ' + str(best_sum_time))
       print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
       break
@@ -443,7 +446,7 @@ def collect_result(res):
     if generated_points[tuple_point] == PointStatus.STARTED:
       generated_points[tuple_point] = PointStatus.INTERRUPTED
   # If a new record point is found:
-  if (is_all_sat == True and cur_sum_time > 0) and (cur_sum_time < best_sum_time or best_sum_time <= 0):
+  if (is_all_sat == True and cur_sum_time > 0) and (cur_sum_time < best_sum_time*KOEF_NEW_BEST_POINT or best_sum_time <= 0):
     is_updated = True
     updates_num += 1
     best_sum_time = cur_sum_time
@@ -807,6 +810,8 @@ if __name__ == '__main__':
 
   # Print statistics:
   elapsed_time = round(time.time() - start_time, 2)
+  best_sum_time = round(best_sum_time, 2)
+  max_instance_time_best_point = round(max_instance_time_best_point, 2)
   print('')
   print('Elapsed : ' + str(elapsed_time) + ' seconds')
   print(str(iter) + ' iterations')
