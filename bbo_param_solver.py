@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.9.4'
+version = '0.9.5'
 
 import sys
 import glob
@@ -781,12 +781,13 @@ if __name__ == '__main__':
         is_inner_break = True
       if is_inner_break:
         print('Break inner loop.')
-        while len(pool._cache) > 0:
-          kill_solver(solver_name, generated_points)
-          time.sleep(1)
-        assert(len(pool._cache) == 0)
+        kill_solver(solver_name, generated_points)
+        time.sleep(1)
+        kill_solver(solver_name, generated_points)
+        time.sleep(1)
         pool.close()
         pool.join()
+        assert(len(pool._cache) == 0)
         break
       # A CPU core is free, so generate a new point and process it:
       one_point_list = oneplusone(best_point, params, paramsdict, 1, generated_points)
