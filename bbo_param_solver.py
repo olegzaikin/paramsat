@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.9.5'
+version = '0.9.6'
 
 import sys
 import glob
@@ -433,13 +433,17 @@ def collect_result(res):
   #print('Sum time in collect_result : ' + str(cur_sum_time) + ' seconds')
   #print('max_time : ' + str(max_time) + ' seconds')
   tuple_point = tuple(point)
-  # Check that processing of the point has been started:
-  # If all CNFs are processed, mark the point as 'finished':
+  assert(generated_points[tuple_point] == PointStatus.STARTED or generated_points[tuple_point] == PointStatus.UNFINISHED)
+  # Three cases:
+  # 1) A SAT solver was interrupted on a CNF due to a time limit, so STARTED -> INTERRUPTED
+  # 2) A SAT solver was interrupted on a CNF since a new record is found (and then kill_solver() 
+  #      marked all current points as UNFINISHED), do not change the status UNFINISHED to let this 
+  #      point be processed again later.
+  # 3) All CNFs are processed, and the point is marked STARTED, so STARTED -> FINISHED
+  # 4) All CNFs are processed, and the point is marked UNFINISHED by kill_solver(), so UNFINISHED -> FINISHED
   if is_all_sat == True:
-    assert(generated_points[tuple_point] == PointStatus.STARTED)
     generated_points[tuple_point] = PointStatus.FINISHED
   else:
-    assert(generated_points[tuple_point] == PointStatus.STARTED or generated_points[tuple_point] == PointStatus.UNFINISHED)
     # If a new best point is found and all current points are interrupted by killing their solvers,
     # then these points already have the status 'unfinished', so do not change their status here.
     # Otherwise, the status is changed:
@@ -781,13 +785,11 @@ if __name__ == '__main__':
         is_inner_break = True
       if is_inner_break:
         print('Break inner loop.')
-        kill_solver(solver_name, generated_points)
-        time.sleep(1)
-        kill_solver(solver_name, generated_points)
-        time.sleep(1)
+        while len(pool._cache) > 0:
+          kill_solver(solver_name, generated_points)
+          time.sleep(1)
         pool.close()
         pool.join()
-        assert(len(pool._cache) == 0)
         break
       # A CPU core is free, so generate a new point and process it:
       one_point_list = oneplusone(best_point, params, paramsdict, 1, generated_points)
