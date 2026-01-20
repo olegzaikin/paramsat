@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.9.6'
+version = '0.10.0'
 
 import sys
 import glob
@@ -48,7 +48,6 @@ class Options:
 	max_points = 1000
 	max_time = -1
 	max_solver_time = -1
-	points_file = ''
 	defpcs_file = ''
 	cpu_num = 1
 	seed = 0
@@ -58,8 +57,6 @@ class Options:
 		self.max_points = 1000
 		self.max_time = 86400
 		self.max_solver_time = -1
-		self.points_file = ''
-		self.origpcs_file = ''
 		self.cpu_num = 1
 		self.seed = 0
 		self.is_solving = False
@@ -68,8 +65,6 @@ class Options:
 		'max_points      : ' + str(self.max_points) + '\n' +\
 		'max_time        : ' + str(self.max_time) + '\n' +\
 		'max_solver_time : ' + str(self.max_solver_time) + '\n' +\
-		'points_file     : ' + str(self.points_file) + '\n' +\
-		'origpcs_file    : ' + str(self.origpcs_file) + '\n' +\
 		'cpu_num         : ' + str(self.cpu_num) + '\n' +\
 		'seed            : ' + str(self.seed) + '\n' +\
 		'is_solving      : ' + str(self.is_solving)
@@ -84,10 +79,6 @@ class Options:
 				self.max_time = math.ceil(float(p.split('-maxtime=')[1]))
 			if '-maxsolvertime=' in p:
 				self.max_solver_time = math.ceil(float(p.split('-maxsolvertime=')[1]))
-			if '-pointsfile=' in p:
-				self.points_file = p.split('-pointsfile=')[1]
-			if '-origpcsfile=' in p:
-				self.origpcs_file = p.split('-origpcsfile=')[1]
 			if '-cpunum=' in p:
 				self.cpu_num = int(p.split('-cpunum=')[1])
 			if '-seed=' in p:
@@ -113,8 +104,6 @@ def print_usage():
   '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
   '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
   '  -maxsolvertime=<int>   - (default : -1)    maximum SAT solver runtime' + '\n' +\
-  '  -pointsfile=<string>   - (default : "")    path to a file with points' + '\n' +\
-  '  -origpcsfile=<string>  - (default : "")    path to the original parameters file' + '\n' +\
   '  -cpunum=<int>          - (default : 1)     number of used CPU cores' + '\n' +\
   '  -seed=<int>            - (default : 0)     seed for pseudorandom generator' + '\n' +\
   '  --solving              - (default : off)   solving mode' + '\n\n' +\
@@ -498,25 +487,6 @@ def write_points(points : dict, cnfs : list):
       f.write(str(p))
       f.write('\n')
 
-# Read points from a text file:
-def read_points(points_file_name : str, def_point : list, paramsdict : dict):
-  if points_file_name == '':
-    return []
-  given_points = []
-  with open(points_file_name, 'r') as points_file:
-    lines = points_file.read().splitlines()
-    for line in lines:
-      words = line.split()
-      point = copy.deepcopy(def_point)
-      for word in words:
-        param_name = word.split('--')[1].split('=')[0]
-        if param_name in paramsdict:
-          value = convert_if_int(word.split('=')[1])
-          point[paramsdict[param_name]] = value
-      assert(len(point) == len(def_point))
-      given_points.append(point)
-  return given_points
-
 # Write final best point as a pcs file:
 def write_final_pcs(best_point : list, params : list, cnfs : list):
   assert(len(best_point) == len(params))
@@ -611,22 +581,6 @@ if __name__ == '__main__':
   print('Default point :')
   print(str(def_point))
 
-  # Read original parameters if given:
-  orig_params = []
-  orig_point = []
-  if op.origpcs_file != '':
-    orig_params = read_pcs(op.origpcs_file)
-    orig_val_num = 0
-    for prm in orig_params:
-      orig_val_num += len(prm.values)
-      orig_point.append(prm.default)
-    print(str(orig_val_num) + ' values in original parameters')
-    assert(orig_val_num > 0)
-    assert(orig_val_num == total_val_num)
-    assert(len(orig_point) == len(params))
-    print('Original point :')
-    print(str(orig_point))
-
   total_val_num = 0
   print(str(len(params)) + ' parameters')
 
@@ -635,13 +589,6 @@ if __name__ == '__main__':
     paramsdict[params[i].name] = i
   print('DictionaryA of parameters :')
   print(paramsdict)  
-
-  # Read points which are given in a text file:
-  given_points = read_points(op.points_file, def_point, paramsdict)
-  print(str(len(given_points)) + " points are given in a file :")
-  for p in given_points:
-    print(str(p))
-  print('')
 
   cnfs = []
   cnfs = read_cnfs(cnfs_folder_name)
@@ -666,53 +613,14 @@ if __name__ == '__main__':
   # A dictionary of generated points, where a tuple representation of the
   # point's parameters values is an ID, while the VALUE is a point's status:
   generated_points = dict()
-  start_points = []
 
-  start_points.append(def_point)
   # In runtime on default point is given, mark it as generated and processed:
   if default_sum_time > 0:
     processed_points_num = 1 # the default point is processed
+    tuple_point = tuple(def_point)
+    generated_points[tuple_point] = PointStatus.GENERATED
     assert(len(generated_points) == 1)
     assert(default_sum_time > 0)
-  # If default point's runtime is not given, generate default points:
-  else:
-    assert(default_sum_time == -1)
-    print('Runtime for default point is not given, process it:')
-    print(str(def_point))
-    # SAT point, i.e. --target=2 --restartint=50:
-    sat_point = copy.deepcopy(def_point)
-    sat_point[paramsdict['target']] = 2
-    sat_point[paramsdict['restartint']] = 50
-    assert(len(sat_point) == len(params))
-    if (sat_point not in start_points):
-      start_points.append(sat_point)
-      print('... and SAT-params point :')
-      print(str(sat_point))
-    else:
-      print('SAT-point already exists')
-    if len(orig_point) > 0:
-      # Original default point:
-      if orig_point not in start_points:
-        start_points.append(orig_point)
-        print('... and original default point :')
-        print(str(orig_point))
-      else:
-        print('orig-point already exists')
-      # original SAT point, i.e. orig with --target=2 --restartint=50:
-      sat_orig_point = copy.deepcopy(orig_point)
-      sat_orig_point[paramsdict['target']] = 2
-      sat_orig_point[paramsdict['restartint']] = 50
-      assert(len(sat_orig_point) == len(orig_params))
-      if (sat_orig_point not in start_points):
-        start_points.append(sat_orig_point)
-        print('... and SAT-orig-params point :')
-        print(str(sat_orig_point))
-      else:
-        print('SAT-point already exists')
-  
-  if op.cpu_num < len(start_points):
-    start_points = start_points[:op.cpu_num]
-    print('start_points was reduced to ' + str(len(start_points)))
 
   skipped_points_num = 0
   skipped_impos_num = 0
@@ -729,16 +637,7 @@ if __name__ == '__main__':
     elapsed_time = round(time.time() - start_time, 2)
     print('elapsed : ' + str(elapsed_time) + ' seconds')
     points_to_process = []
-    if best_sum_time == -1:
-      assert(iter == 0)
-      # Only def and sat points:
-      assert(len(start_points) <= 4)
-      for p in start_points:
-        assert(len(p) == len(params))
-        points_to_process.append(p)
-        tuple_point = tuple(p)
-        generated_points[tuple_point] = PointStatus.GENERATED
-    oneplusone_points = oneplusone(best_point, params, paramsdict, op.cpu_num - len(points_to_process), generated_points)
+    oneplusone_points = oneplusone(best_point, params, paramsdict, op.cpu_num, generated_points)
     for p in oneplusone_points:
        assert(len(p) == len(params))
        points_to_process.append(p)
