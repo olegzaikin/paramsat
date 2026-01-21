@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.10.1'
+version = '0.10.2'
 
 import sys
 import glob
@@ -334,12 +334,13 @@ def points_diff(p1 : list, p2 : list, params : list):
 # Run solver on a given point:
 def calc_obj(solver_name : str, best_sum_time : float, \
   max_instance_time_best_point : float, cnfs : list, \
-  params : list, point : list, is_solving : bool):
+  params : list, point : list, is_solving : bool, \
+  start_time : float, max_wall_time : float):
   assert(len(params) > 1)
   assert(len(params) == len(point))
   assert(len(cnfs) > 0)
   cur_sum_time = 0.0
-  max_time = -1
+  max_instance_time = -1
   is_all_sat = True
   # Solver's time limit on each CNF is the current best obj func value:
   if max_instance_time_best_point > 0:
@@ -375,7 +376,7 @@ def calc_obj(solver_name : str, best_sum_time : float, \
       sat_num += 1
       # Only if a CNF is solved in time limit:
       cur_sum_time += t
-      max_time = t if max_time < t else max_time
+      max_instance_time = t if max_instance_time < t else max_instance_time
       #print('Time : ' + str(t) + ' on CNF ' + cnf_file_name)
       # In solving mode, the CDCL solver's log should be saved:
       if is_solving:
@@ -393,12 +394,17 @@ def calc_obj(solver_name : str, best_sum_time : float, \
       print('Current obj func value ' + str(cur_sum_time) + ' is already worse than ' + str(best_sum_time))
       print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
       break
+    elapsed_time = round(time.time() - start_time, 2)
+    if elapsed_time >= max_wall_time:
+      print('Wall time limit is reached while calculating objective function')
+      print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
+      break
   # end of loop 'for cnf_file_name in cnfs'
   is_all_sat = False
   if sat_num == len(cnfs):
     is_all_sat = True
   #print('Obj func value : ' + str(cur_sum_time))
-  return point, cur_sum_time, max_time, is_all_sat, sys_str
+  return point, cur_sum_time, max_instance_time, is_all_sat, sys_str
 
 # Collect a result produced by solver:
 def collect_result(res):
@@ -659,7 +665,7 @@ if __name__ == '__main__':
       assert(generated_points[tuple_point] == PointStatus.GENERATED)
       # Mark that the calculation is started:
       generated_points[tuple_point] = PointStatus.STARTED
-      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, p, op.is_solving), callback=collect_result)
+      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, p, op.is_solving, start_time, op.max_time), callback=collect_result)
     is_inner_break = False
     # Repeat until a new record is found or the processed points limit is reached:
     while True:
@@ -703,7 +709,7 @@ if __name__ == '__main__':
       assert(generated_points[tuple_point] == PointStatus.GENERATED)
       # Mark that the calculation is started:
       generated_points[tuple_point] = PointStatus.STARTED
-      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, one_point_list[0], op.is_solving), callback=collect_result)
+      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, one_point_list[0], op.is_solving, start_time, op.max_time), callback=collect_result)
     if is_extern_break:
        print('Break main loop')
        break
