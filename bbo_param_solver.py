@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.10.0'
+version = '0.10.1'
 
 import sys
 import glob
@@ -197,7 +197,7 @@ def create_solver_copy(solver_name : str, random_str : str):
 def next_value(lst : list, cur_val : int):
   indx = lst.index(cur_val)
   assert(indx >= 0 and indx < len(lst))
-  weights = [0 for x in lst]
+  weights = [0 for _ in lst]
   max_dist_to_left = indx
   max_dist_to_right = len(lst) - indx - 1
   max_dist = max(max_dist_to_left, max_dist_to_right)
@@ -283,13 +283,14 @@ def oneplusone(point : list, params : list, paramsdict : dict, \
   # Change each value with probability:
   while len(new_points) < points_num_to_gen:
     pnt = copy.deepcopy(point)
-    for i in range(len(params)):
-      prob = random.random()
-      if (prob <= 1/len(params)):
-        oldval = pnt[i]
-        pnt[i] = next_value(params[i].values, pnt[i])
-        assert(pnt != point)
-    # Check if point is impossible combination:
+    # With probability 36 % the point is the same, so do until it is a new one:
+    while pnt == point:
+      for i in range(len(params)):
+        prob = random.random()
+        if (prob <= 1/len(params)):
+          pnt[i] = next_value(params[i].values, pnt[i])
+    assert(pnt != point)
+    # Check if point is an impossible combination:
     if not possibcomb(pnt, def_point, params, paramsdict):
       #print('Impossible combination:')
       #print(strlistrepr(pnt))
@@ -638,11 +639,15 @@ if __name__ == '__main__':
     print('elapsed : ' + str(elapsed_time) + ' seconds')
     points_to_process = []
     oneplusone_points = oneplusone(best_point, params, paramsdict, op.cpu_num, generated_points)
+    def_points_to_process_num = 0
     for p in oneplusone_points:
        assert(len(p) == len(params))
        points_to_process.append(p)
+       if p == def_point:
+         def_points_to_process_num += 1
     print(str(len(points_to_process)) + ' points to process')
     print('of them generated ' + str(len(oneplusone_points)) + ' oneplusone points')
+    print('of them default points: ' + str(def_points_to_process_num))
     assert(len(points_to_process) == op.cpu_num)
     pool = mp.Pool(op.cpu_num)
     is_updated = False
