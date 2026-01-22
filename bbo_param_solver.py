@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.10.2'
+version = '0.10.3'
 
 import sys
 import glob
@@ -46,7 +46,7 @@ class PointStatus(Enum):
 class Options:
 	def_point_time = -1
 	max_points = 1000
-	max_time = -1
+	max_wall_time = -1
 	max_solver_time = -1
 	defpcs_file = ''
 	cpu_num = 1
@@ -55,7 +55,7 @@ class Options:
 	def __init__(self):
 		self.def_point_time = -1
 		self.max_points = 1000
-		self.max_time = 86400
+		self.max_wall_time = 86400
 		self.max_solver_time = -1
 		self.cpu_num = 1
 		self.seed = 0
@@ -63,7 +63,7 @@ class Options:
 	def __str__(self):
 		s = 'def_point_time  : ' + str(self.def_point_time) + '\n' +\
 		'max_points      : ' + str(self.max_points) + '\n' +\
-		'max_time        : ' + str(self.max_time) + '\n' +\
+		'max_wall_time   : ' + str(self.max_wall_time) + '\n' +\
 		'max_solver_time : ' + str(self.max_solver_time) + '\n' +\
 		'cpu_num         : ' + str(self.cpu_num) + '\n' +\
 		'seed            : ' + str(self.seed) + '\n' +\
@@ -76,7 +76,7 @@ class Options:
 			if '-maxpoints=' in p:
 				self.max_points = math.ceil(float(p.split('-maxpoints=')[1]))
 			if '-maxtime=' in p:
-				self.max_time = math.ceil(float(p.split('-maxtime=')[1]))
+				self.max_wall_time = math.ceil(float(p.split('-maxtime=')[1]))
 			if '-maxsolvertime=' in p:
 				self.max_solver_time = math.ceil(float(p.split('-maxsolvertime=')[1]))
 			if '-cpunum=' in p:
@@ -421,13 +421,13 @@ def collect_result(res):
   assert(len(res) == 5)
   point = res[0]
   cur_sum_time = res[1]
-  max_time = res[2]
+  max_wall_time = res[2]
   is_all_sat = res[3]
   command = res[4]
   # If interrupted, then not all instances are satisfiable:
   assert(cur_sum_time > 0 or (cur_sum_time < 0 and not is_all_sat))
   #print('Sum time in collect_result : ' + str(cur_sum_time) + ' seconds')
-  #print('max_time : ' + str(max_time) + ' seconds')
+  #print('max_wall_time : ' + str(max_wall_time) + ' seconds')
   tuple_point = tuple(point)
   assert(generated_points[tuple_point] == PointStatus.STARTED or generated_points[tuple_point] == PointStatus.UNFINISHED)
   # Three cases:
@@ -452,7 +452,7 @@ def collect_result(res):
     best_sum_time = cur_sum_time
     best_point = copy.deepcopy(point)
     best_command = command
-    max_instance_time_best_point = max_time
+    max_instance_time_best_point = max_wall_time
     elapsed_time = round(time.time() - start_time, 2)
     print('')
     print('Updated best sum time : ' + str(best_sum_time))
@@ -567,7 +567,11 @@ if __name__ == '__main__':
   op.read(sys.argv[3:])
   print(op)
 
-  random.seed(op.seed)
+  # Force the seed depend on wall time and number of CPU cores.
+  # + 1 is needed to avoid multiplying by 0 if the base seed is 0.
+  seed = (op.seed + 1) * op.max_wall_time * op.cpu_num
+  random.seed(seed)
+  print('Seed ' + str(seed) + ' is used formed on the base of initial seed ' + str(op.seed) )
 
   random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k = 10))    
   print("The randomly generated string is : " + str(random_str))
@@ -594,7 +598,7 @@ if __name__ == '__main__':
   paramsdict = dict()
   for i in range(len(params)):
     paramsdict[params[i].name] = i
-  print('DictionaryA of parameters :')
+  print('Dictionary of parameters :')
   print(paramsdict)  
 
   cnfs = []
@@ -639,7 +643,7 @@ if __name__ == '__main__':
   elapsed_time = 0
 
   # Repeat until all points a processed:
-  while processed_points_num < op.max_points and elapsed_time < op.max_time:
+  while processed_points_num < op.max_points and elapsed_time < op.max_wall_time:
     print('\n*** iter : ' + str(iter))
     elapsed_time = round(time.time() - start_time, 2)
     print('elapsed : ' + str(elapsed_time) + ' seconds')
@@ -665,7 +669,7 @@ if __name__ == '__main__':
       assert(generated_points[tuple_point] == PointStatus.GENERATED)
       # Mark that the calculation is started:
       generated_points[tuple_point] = PointStatus.STARTED
-      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, p, op.is_solving, start_time, op.max_time), callback=collect_result)
+      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, p, op.is_solving, start_time, op.max_wall_time), callback=collect_result)
     is_inner_break = False
     # Repeat until a new record is found or the processed points limit is reached:
     while True:
@@ -681,7 +685,7 @@ if __name__ == '__main__':
       if processed_points_num >= op.max_points:
         print('The limit on the number of points is reached, break.')
         is_inner_break = True
-      elif elapsed_time >= op.max_time:
+      elif elapsed_time >= op.max_wall_time:
         print('The time limit is reached, break.')
         is_inner_break = True
       if is_updated:
@@ -709,7 +713,7 @@ if __name__ == '__main__':
       assert(generated_points[tuple_point] == PointStatus.GENERATED)
       # Mark that the calculation is started:
       generated_points[tuple_point] = PointStatus.STARTED
-      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, one_point_list[0], op.is_solving, start_time, op.max_time), callback=collect_result)
+      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, one_point_list[0], op.is_solving, start_time, op.max_wall_time), callback=collect_result)
     if is_extern_break:
        print('Break main loop')
        break
