@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.10.3'
+version = '0.10.4'
 
 import sys
 import glob
@@ -320,16 +320,14 @@ def oneplusone(point : list, params : list, paramsdict : dict, \
 def points_diff(p1 : list, p2 : list, params : list):
   assert(len(p1) == len(p2))
   assert(len(p1) == len(params))
-  if p1 == p2:
-    return 'The new point is the default one'
-  s0 = 'Difference from the default point : \n'
-  s = ''
-  for i in range(len(p1)):
-    if p1[i] != p2[i]:
-      s += '  ' + params[i].name + ' : ' + str(p1[i]) + \
-        ' -> ' + str(p2[i]) + '\n'
-  assert(s != '')
-  return s0 + s[:-1]
+  res_str = ''
+  if p1 != p2:
+    for i in range(len(p1)):
+      if p1[i] != p2[i]:
+        res_str += '  ' + params[i].name + ' : ' + str(p1[i]) + \
+          ' -> ' + str(p2[i]) + '\n'
+    res_str = res_str[:-1]  
+  return res_str
 
 # Run solver on a given point:
 def calc_obj(solver_name : str, best_sum_time : float, \
@@ -355,7 +353,9 @@ def calc_obj(solver_name : str, best_sum_time : float, \
     cnf_num += 1
     sys_str = ''
     if solver_time_lim > 0:
-      sys_str = solver_name + ' --time=' + str(math.ceil(solver_time_lim)) + ' '
+      rounded_solver_time_lim = math.ceil(solver_time_lim)
+      assert(rounded_solver_time_lim > 0)
+      sys_str = solver_name + ' --time=' + str(rounded_solver_time_lim) + ' '
     else:
       sys_str = solver_name + ' '
     for i in range(len(params)):
@@ -409,6 +409,7 @@ def calc_obj(solver_name : str, best_sum_time : float, \
 # Collect a result produced by solver:
 def collect_result(res):
   global updates_num
+  global default_sum_time
   global best_sum_time
   global best_point
   global best_command
@@ -458,7 +459,15 @@ def collect_result(res):
     print('Updated best sum time : ' + str(best_sum_time))
     print('max_instance_time_best_point : ' + str(max_instance_time_best_point))
     print('elapsed : ' + str(elapsed_time) + ' seconds')
-    print(points_diff(def_point, best_point, params))
+    if def_point == best_point:
+      print('The new record point is the default one')
+      if default_sum_time == -1:
+        default_sum_time = best_sum_time
+    else:
+      diff_str = points_diff(def_point, best_point, params)
+      assert(diff_str != '')
+      print('Difference from the default point :')
+      print(diff_str)
     print(best_command + '\n')
 
 # Read all CNFs in a given folder:
@@ -571,7 +580,7 @@ if __name__ == '__main__':
   # + 1 is needed to avoid multiplying by 0 if the base seed is 0.
   seed = (op.seed + 1) * op.max_wall_time * op.cpu_num
   random.seed(seed)
-  print('Seed ' + str(seed) + ' is used formed on the base of initial seed ' + str(op.seed) )
+  print('Seed ' + str(seed) + ' is formed on the base of initial seed ' + str(op.seed) )
 
   random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k = 10))    
   print("The randomly generated string is : " + str(random_str))
@@ -624,6 +633,9 @@ if __name__ == '__main__':
   # A dictionary of generated points, where a tuple representation of the
   # point's parameters values is an ID, while the VALUE is a point's status:
   generated_points = dict()
+  start_points = []
+  # Earlier, sat- and unsat- points from Kissat were added here:
+  start_points.append(def_point)
 
   # In runtime on default point is given, mark it as generated and processed:
   if default_sum_time > 0:
@@ -648,16 +660,35 @@ if __name__ == '__main__':
     elapsed_time = round(time.time() - start_time, 2)
     print('elapsed : ' + str(elapsed_time) + ' seconds')
     points_to_process = []
-    oneplusone_points = oneplusone(best_point, params, paramsdict, op.cpu_num, generated_points)
-    def_points_to_process_num = 0
-    for p in oneplusone_points:
-       assert(len(p) == len(params))
-       points_to_process.append(p)
+    # If an objective function's value on the default point is not given, add calculate the point:
+    if best_sum_time == -1:
+      assert(iter == 0)
+      # Only def point:
+      assert(len(start_points) == 1)
+      for p in start_points:
+        assert(len(p) == len(params))
+        points_to_process.append(p)
+        tuple_point = tuple(p)
+        generated_points[tuple_point] = PointStatus.GENERATED
+    needed_oneplusone_points_num = op.cpu_num - len(points_to_process)
+    assert(needed_oneplusone_points_num >= 0)
+    assert(needed_oneplusone_points_num <= op.cpu_num)
+    # If at least one (1+1) point is required:
+    oneplusone_points = []
+    if needed_oneplusone_points_num > 0:
+      oneplusone_points = oneplusone(best_point, params, paramsdict, needed_oneplusone_points_num, generated_points)
+      for p in oneplusone_points:
+        assert(len(p) == len(params))
+        points_to_process.append(p)
+    assert(len(points_to_process) == op.cpu_num)
+    is_def_point_to_process = False
+    for p in points_to_process:
        if p == def_point:
-         def_points_to_process_num += 1
+          is_def_point_to_process = True
     print(str(len(points_to_process)) + ' points to process')
-    print('of them generated ' + str(len(oneplusone_points)) + ' oneplusone points')
-    print('of them default points: ' + str(def_points_to_process_num))
+    print('of them ' + str(len(oneplusone_points)) + ' oneplusone points')
+    if is_def_point_to_process:
+      print('of them 1 default point to process')
     assert(len(points_to_process) == op.cpu_num)
     pool = mp.Pool(op.cpu_num)
     is_updated = False
@@ -745,5 +776,11 @@ if __name__ == '__main__':
   print('Final best sum time : ' + str(best_sum_time) + ' , so ' + \
     str(default_sum_time) + ' -> ' + str(best_sum_time))
   if updates_num > 0:
-    print(points_diff(def_point, best_point, params))
+    if best_point == def_point:
+        print('The best point is the default one')
+    else:
+      diff_str = points_diff(def_point, best_point, params)
+      assert(diff_str != '')
+      print('Difference from the default point:')
+      print(diff_str)
   print('Final best command : \n' + best_command)
