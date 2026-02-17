@@ -18,7 +18,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.10.4'
+version = '0.10.5'
 
 import sys
 import glob
@@ -634,16 +634,17 @@ if __name__ == '__main__':
   # point's parameters values is an ID, while the VALUE is a point's status:
   generated_points = dict()
   start_points = []
-  # Earlier, sat- and unsat- points from Kissat were added here:
-  start_points.append(def_point)
-
-  # In runtime on default point is given, mark it as generated and processed:
+  # In runtime on default point is given, mark it as finished:
   if default_sum_time > 0:
     processed_points_num = 1 # the default point is processed
     tuple_point = tuple(def_point)
-    generated_points[tuple_point] = PointStatus.GENERATED
+    generated_points[tuple_point] = PointStatus.FINISHED
     assert(len(generated_points) == 1)
     assert(default_sum_time > 0)
+    print('The default point is marked as finished.')
+  else:
+    # otherwise, add the default point to the queue for processing:
+    start_points.append(def_point) # earlier, sat- and unsat- points from Kissat were added here
 
   skipped_points_num = 0
   skipped_impos_num = 0
@@ -660,16 +661,13 @@ if __name__ == '__main__':
     elapsed_time = round(time.time() - start_time, 2)
     print('elapsed : ' + str(elapsed_time) + ' seconds')
     points_to_process = []
-    # If an objective function's value on the default point is not given, add calculate the point:
-    if best_sum_time == -1:
-      assert(iter == 0)
-      # Only def point:
-      assert(len(start_points) == 1)
+    # Process start points only on the first iteration:
+    if iter == 0:
       for p in start_points:
         assert(len(p) == len(params))
         points_to_process.append(p)
         tuple_point = tuple(p)
-        generated_points[tuple_point] = PointStatus.GENERATED
+        generated_points[tuple_point] = PointStatus.GENERATED  
     needed_oneplusone_points_num = op.cpu_num - len(points_to_process)
     assert(needed_oneplusone_points_num >= 0)
     assert(needed_oneplusone_points_num <= op.cpu_num)
