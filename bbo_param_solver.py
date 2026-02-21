@@ -16,9 +16,10 @@
 #
 # TODOs:
 # 0. Extend to unsatisfiable CNFs.
+# 1. sktop - deal with UNFINISHED when more than 1 thread
 
 script_name = "bbo_param_solver.py"
-version = '0.10.5'
+version = '0.11.0'
 
 import sys
 import glob
@@ -31,9 +32,14 @@ import string
 from enum import Enum
 from datetime import datetime
 import multiprocessing as mp
+import numpy as np
+from skopt import Optimizer
+from skopt.space import Categorical
 
 # A new best point must be at least 1% better than the current best point:
 KOEF_NEW_BEST_POINT = 0.99
+
+skt_opt = None
 
 class PointStatus(Enum):
     GENERATED = 0 # a point is generated
@@ -44,6 +50,7 @@ class PointStatus(Enum):
 
 # Input options:
 class Options:
+	opt_alg = "1+1"
 	def_point_time = -1
 	max_points = 1000
 	max_wall_time = -1
@@ -61,7 +68,8 @@ class Options:
 		self.seed = 0
 		self.is_solving = False
 	def __str__(self):
-		s = 'def_point_time  : ' + str(self.def_point_time) + '\n' +\
+		s = 'opt_alg         : ' + self.opt_alg + '\n' +\
+    'def_point_time  : ' + str(self.def_point_time) + '\n' +\
 		'max_points      : ' + str(self.max_points) + '\n' +\
 		'max_wall_time   : ' + str(self.max_wall_time) + '\n' +\
 		'max_solver_time : ' + str(self.max_solver_time) + '\n' +\
@@ -71,6 +79,11 @@ class Options:
 		return s
 	def read(self, argv) :
 		for p in argv:
+			if '-optalg=' in p:
+				tmp = p.split('-optalg=')[1]
+				tmp = tmp.replace("'", "")
+				self.opt_alg = tmp.replace('"', '')
+				assert(self.opt_alg in ["1+1", "GP", "RF", "ET", "GBRT"])
 			if '-defobj=' in p:
 				self.def_point_time = math.ceil(float(p.split('-defobj=')[1]))
 			if '-maxpoints=' in p:
@@ -100,6 +113,7 @@ class Param:
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-folder [Options]')
   print('  Options :\n' +\
+  '  -optalg=["1+1", "GP", "RF", "ET", "GBRT"] - (default : "1+1") type of optimization algorithm' + '\n' +\
   '  -defobj=<float>        - (default : -1)    objective funtion value for the default point' + '\n' +\
   '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
   '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
@@ -266,10 +280,10 @@ def possibcomb(new_point : list, def_point : list, params : list, paramsdict : d
         return False
   return True
 
-# Generate new points via (1+1)-EA:
-def oneplusone(point : list, params : list, paramsdict : dict, \
+# Generate new points via (1+1)-EA or ask-tell interface:
+def ask_points(opt_alg : str, skt_opt, cur_best_point : list, params : list, paramsdict : dict, \
                points_num_to_gen : int, generated_points : dict):
-  assert(len(point) == len(params))
+  assert(len(best_point) == len(params))
   assert(points_num_to_gen >= 0)
   global random
   global def_point
@@ -279,41 +293,57 @@ def oneplusone(point : list, params : list, paramsdict : dict, \
   if points_num_to_gen == 0:
     return []
   new_points = []
-  probability = 1/len(params)
-  # Change each value with probability:
-  while len(new_points) < points_num_to_gen:
-    pnt = copy.deepcopy(point)
-    # With probability 36 % the point is the same, so do until it is a new one:
-    while pnt == point:
-      for i in range(len(params)):
-        prob = random.random()
-        if (prob <= 1/len(params)):
-          pnt[i] = next_value(params[i].values, pnt[i])
-    assert(pnt != point)
-    # Check if point is an impossible combination:
-    if not possibcomb(pnt, def_point, params, paramsdict):
-      #print('Impossible combination:')
-      #print(strlistrepr(pnt))
-      skipped_impos_num += 1
-      #print(str(skipped_impos_num) + ' impossible points skipped')
-      continue
-    point_tuple = tuple(pnt)
-    # If point has been already generated:
-    if point_tuple in generated_points:
-      # If point was already generated but calculation is unfinished:
-      if generated_points[point_tuple] == PointStatus.UNFINISHED:
-        # Change the status to 'generated' to finish the calculation:
-        generated_points[point_tuple] = PointStatus.GENERATED
-        repeatedly_generated_points += 1
-        new_points.append(pnt)
-      else:
-        # The calculation is finished or the point is just generated:
-        skipped_points_num += 1
-        #print(str(skipped_points_num) + ' repeated points skipped')
-    else:
-      # New point and possible combination:
+  if opt_alg == "1+1":
+     # Change each value with probability:
+    while len(new_points) < points_num_to_gen:
+        pnt = copy.deepcopy(cur_best_point)
+        # With probability 36 % the point is the same, so do until it is a new one:
+        while pnt == cur_best_point:
+          for i in range(len(params)):
+            prob = random.random()
+            if (prob <= 1/len(params)):
+              pnt[i] = next_value(params[i].values, pnt[i])
+        assert(pnt != cur_best_point)
+        # Check if point is an impossible combination:
+        #if not possibcomb(pnt, def_point, params, paramsdict):
+          #print('Impossible combination:')
+          #print(strlistrepr(pnt))
+          #skipped_impos_num += 1
+          #print(str(skipped_impos_num) + ' impossible points skipped')
+          #continue
+        point_tuple = tuple(pnt)
+        # If point has been already generated:
+        if point_tuple in generated_points:
+          # If point was already generated but calculation is unfinished:
+          if generated_points[point_tuple] == PointStatus.UNFINISHED:
+            # Change the status to 'generated' to finish the calculation:
+            generated_points[point_tuple] = PointStatus.GENERATED
+            repeatedly_generated_points += 1
+            new_points.append(pnt)
+          else:
+            # The calculation is finished or the point is just generated:
+            skipped_points_num += 1
+            #print(str(skipped_points_num) + ' repeated points skipped')
+        else:
+          # New point and possible combination:
+          generated_points[point_tuple] = PointStatus.GENERATED
+          new_points.append(pnt)
+  elif opt_alg != "1+1": # "GP", "RF", "ET", "GBRT"
+    new_points_npint64 = skt_opt.ask(n_points=points_num_to_gen)
+    #print(generated_points)
+    #print(new_points_npint64)
+    assert(len(new_points_npint64) == points_num_to_gen)
+    new_points = []
+    # Convert from numpy in64 to int:
+    for p in new_points_npint64:
+      new_points.append([int(x) for x in p])
+    for p in new_points:
+      assert(p != cur_best_point)
+      point_tuple = tuple(p)
+      # Each ask must be completed by tell, so no same points:
+      assert(point_tuple not in generated_points)
       generated_points[point_tuple] = PointStatus.GENERATED
-      new_points.append(pnt)
+    #
   return new_points
 
 # Difference between two given points (empty string if equal points):
@@ -419,6 +449,8 @@ def collect_result(res):
   global start_time
   global is_updated
   global generated_points
+  global op 
+  global skt_opt
   assert(len(res) == 5)
   point = res[0]
   cur_sum_time = res[1]
@@ -440,12 +472,17 @@ def collect_result(res):
   # 4) All CNFs are processed, and the point is marked UNFINISHED by kill_solver(), so UNFINISHED -> FINISHED
   if is_all_sat == True:
     generated_points[tuple_point] = PointStatus.FINISHED
+    if op.opt_alg != '1+1':
+      res = skt_opt.tell(point, cur_sum_time)
   else:
     # If a new best point is found and all current points are interrupted by killing their solvers,
     # then these points already have the status 'unfinished', so do not change their status here.
     # Otherwise, the status is changed:
     if generated_points[tuple_point] == PointStatus.STARTED:
       generated_points[tuple_point] = PointStatus.INTERRUPTED
+      if op.opt_alg != '1+1':
+        # Penalty-value of the objective function if interrupted:
+        res = skt_opt.tell(point, best_sum_time*2)
   # If a new record point is found:
   if (is_all_sat == True and cur_sum_time > 0) and (cur_sum_time < best_sum_time*KOEF_NEW_BEST_POINT or best_sum_time <= 0):
     is_updated = True
@@ -590,6 +627,17 @@ if __name__ == '__main__':
 
   params = read_pcs(param_file_name)
 
+  skt_opt_space=[]
+  # space.append(Integer(0, 10, name='x2'))
+  for param in params:
+     skt_opt_space.append(Categorical(param.values, name=param.name))
+
+  estimator_type = 'GP'
+  if op.opt_alg != "1+1":
+     estimator_type = op.opt_alg
+     print('sktopt estimator type : ' + estimator_type)
+  skt_opt = Optimizer(skt_opt_space, base_estimator=estimator_type, n_initial_points=10, random_state=seed)
+
   def_point = list()
   total_val_num = 0
   for prm in params:
@@ -668,14 +716,14 @@ if __name__ == '__main__':
         points_to_process.append(p)
         tuple_point = tuple(p)
         generated_points[tuple_point] = PointStatus.GENERATED  
-    needed_oneplusone_points_num = op.cpu_num - len(points_to_process)
-    assert(needed_oneplusone_points_num >= 0)
-    assert(needed_oneplusone_points_num <= op.cpu_num)
+    needed_new_points_num = op.cpu_num - len(points_to_process)
+    assert(needed_new_points_num >= 0)
+    assert(needed_new_points_num <= op.cpu_num)
     # If at least one (1+1) point is required:
     oneplusone_points = []
-    if needed_oneplusone_points_num > 0:
-      oneplusone_points = oneplusone(best_point, params, paramsdict, needed_oneplusone_points_num, generated_points)
-      for p in oneplusone_points:
+    if needed_new_points_num > 0:
+      new_points = ask_points(op.opt_alg, skt_opt, best_point, params, paramsdict, needed_new_points_num, generated_points)
+      for p in new_points:
         assert(len(p) == len(params))
         points_to_process.append(p)
     assert(len(points_to_process) == op.cpu_num)
@@ -684,7 +732,7 @@ if __name__ == '__main__':
        if p == def_point:
           is_def_point_to_process = True
     print(str(len(points_to_process)) + ' points to process')
-    print('of them ' + str(len(oneplusone_points)) + ' oneplusone points')
+    print('of them ' + str(len(oneplusone_points)) + ' newly generated points')
     if is_def_point_to_process:
       print('of them 1 default point to process')
     assert(len(points_to_process) == op.cpu_num)
@@ -728,14 +776,16 @@ if __name__ == '__main__':
         is_inner_break = True
       if is_inner_break:
         print('Break inner loop.')
-        while len(pool._cache) > 0:
-          kill_solver(solver_name, generated_points)
-          time.sleep(1)
+        # Don't kill solver in the sequential mode:
+        if op.cpu_num > 1:
+          while len(pool._cache) > 0:
+            kill_solver(solver_name, generated_points)
+            time.sleep(1)
         pool.close()
         pool.join()
         break
       # A CPU core is free, so generate a new point and process it:
-      one_point_list = oneplusone(best_point, params, paramsdict, 1, generated_points)
+      one_point_list = ask_points(op.opt_alg, skt_opt, best_point, params, paramsdict, 1, generated_points)
       assert(len(one_point_list) == 1)
       # Check the point's status:
       tuple_point = tuple(one_point_list[0])
