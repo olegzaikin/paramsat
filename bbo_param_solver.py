@@ -19,7 +19,7 @@
 # 1. sktop - deal with UNFINISHED when more than 1 thread
 
 script_name = "bbo_param_solver.py"
-version = '0.11.2'
+version = '0.11.3'
 
 import sys
 import glob
@@ -462,6 +462,8 @@ def collect_result(res):
   global generated_points
   global op 
   global skt_opt
+  global cnfs_num
+  assert(cnfs_num > 0)
   assert(len(res) == 5)
   point = res[0]
   cur_sum_time = res[1]
@@ -494,7 +496,15 @@ def collect_result(res):
       generated_points[tuple_point] = PointStatus.INTERRUPTED
       if op.opt_alg != '1+1':
         # Penalty-value of the objective function if interrupted:
-        res = skt_opt.tell(point, best_sum_time*KOEF_INTERRUPTED_PENALTY)
+        penalty_sum_time = op.max_solver_time * cnfs_num
+        res = skt_opt.tell(point, penalty_sum_time)
+        print('Interrupted point got sum_time ' + str(penalty_sum_time))
+  finished_points_num = finished(generated_points)
+  interrupted_points_num = interrupted(generated_points)
+  elapsed_sec = time.time() - start_time
+  s = str(finished_points_num) + ' finished points, ' + str(interrupted_points_num) + ' interrupted points, ' + \
+    'elapsed ' + str(elapsed_sec)
+  print(s)
   # If a new record point is found:
   if (is_all_sat == True and cur_sum_time > 0) and (cur_sum_time < best_sum_time*KOEF_NEW_BEST_POINT or best_sum_time <= 0):
     is_updated = True
@@ -575,6 +585,20 @@ def processed(generated_points : dict):
   for point_tuple in generated_points:
      if generated_points[point_tuple] == PointStatus.FINISHED or \
      generated_points[point_tuple] == PointStatus.INTERRUPTED:
+        res += 1
+  return res
+
+def finished(generated_points : dict):
+  res = 0
+  for point_tuple in generated_points:
+     if generated_points[point_tuple] == PointStatus.FINISHED:
+        res += 1
+  return res
+
+def interrupted(generated_points : dict):
+  res = 0
+  for point_tuple in generated_points:
+     if generated_points[point_tuple] == PointStatus.INTERRUPTED:
         res += 1
   return res
 
@@ -672,6 +696,7 @@ if __name__ == '__main__':
 
   cnfs = []
   cnfs = read_cnfs(cnfs_folder_name)
+  cnfs_num = len(cnfs)
   assert(len(cnfs) > 0)
   print(str(len(cnfs)) + ' CNFs were read :')
   for cnf in cnfs:
