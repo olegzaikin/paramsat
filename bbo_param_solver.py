@@ -19,7 +19,7 @@
 # 1. sktop - deal with UNFINISHED when more than 1 thread
 
 script_name = "bbo_param_solver.py"
-version = '0.11.0'
+version = '0.11.1'
 
 import sys
 import glob
@@ -361,7 +361,8 @@ def points_diff(p1 : list, p2 : list, params : list):
 
 # Run solver on a given point:
 def calc_obj(solver_name : str, best_sum_time : float, \
-  max_instance_time_best_point : float, cnfs : list, \
+  max_instance_time_best_point : float, \
+  initial_max_solver_time : float, opt_alg : str, cnfs : list, \
   params : list, point : list, is_solving : bool, \
   start_time : float, max_wall_time : float):
   assert(len(params) > 1)
@@ -371,10 +372,17 @@ def calc_obj(solver_name : str, best_sum_time : float, \
   max_instance_time = -1
   is_all_sat = True
   # Solver's time limit on each CNF is the current best obj func value:
-  if max_instance_time_best_point > 0:
-    solver_time_lim = max_instance_time_best_point
+  if opt_alg == "1+1":
+    if max_instance_time_best_point > 0:
+      solver_time_lim = max_instance_time_best_point
+    else:
+      solver_time_lim = best_sum_time
+  # Finish more calculations of points for surrogate-based algorithms:
   else:
-    solver_time_lim = best_sum_time
+    if initial_max_solver_time > 0:
+      solver_time_lim = initial_max_solver_time
+    else:
+      solver_time_lim = best_sum_time
   #print('solver_time_lim : ' + str(solver_time_lim))
   # Calculate sum for the solver runtimes:
   cnf_num = 0
@@ -420,10 +428,12 @@ def calc_obj(solver_name : str, best_sum_time : float, \
     # If current value is already worse than the best one:
     #print('sum_time : ' + str(best_sum_time))
     #print('cur_sum_time : ' + str(cur_sum_time))
-    if cnf_num < len(cnfs) and best_sum_time > 0 and cur_sum_time >= best_sum_time*KOEF_NEW_BEST_POINT:
-      print('Current obj func value ' + str(cur_sum_time) + ' is already worse than ' + str(best_sum_time))
-      print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
-      break
+    # Finish more calculations of points for surrogate-based algorithms:
+    if opt_alg == "1+1":
+      if cnf_num < len(cnfs) and best_sum_time > 0 and cur_sum_time >= best_sum_time*KOEF_NEW_BEST_POINT:
+        print('Current obj func value ' + str(cur_sum_time) + ' is already worse than ' + str(best_sum_time))
+        print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
+        break
     elapsed_time = round(time.time() - start_time, 2)
     if elapsed_time >= max_wall_time:
       print('Wall time limit is reached while calculating objective function')
@@ -472,6 +482,7 @@ def collect_result(res):
   # 4) All CNFs are processed, and the point is marked UNFINISHED by kill_solver(), so UNFINISHED -> FINISHED
   if is_all_sat == True:
     generated_points[tuple_point] = PointStatus.FINISHED
+    print('Finished points with sum_time ' + str(cur_sum_time) + ' , max_inst_time ' + str(max_wall_time))
     if op.opt_alg != '1+1':
       res = skt_opt.tell(point, cur_sum_time)
   else:
@@ -746,7 +757,7 @@ if __name__ == '__main__':
       assert(generated_points[tuple_point] == PointStatus.GENERATED)
       # Mark that the calculation is started:
       generated_points[tuple_point] = PointStatus.STARTED
-      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, p, op.is_solving, start_time, op.max_wall_time), callback=collect_result)
+      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, op.max_solver_time, op.opt_alg, cnfs, params, p, op.is_solving, start_time, op.max_wall_time), callback=collect_result)
     is_inner_break = False
     # Repeat until a new record is found or the processed points limit is reached:
     while True:
@@ -792,7 +803,7 @@ if __name__ == '__main__':
       assert(generated_points[tuple_point] == PointStatus.GENERATED)
       # Mark that the calculation is started:
       generated_points[tuple_point] = PointStatus.STARTED
-      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, cnfs, params, one_point_list[0], op.is_solving, start_time, op.max_wall_time), callback=collect_result)
+      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, op.max_solver_time, op.opt_alg, cnfs, params, one_point_list[0], op.is_solving, start_time, op.max_wall_time), callback=collect_result)
     if is_extern_break:
        print('Break main loop')
        break
