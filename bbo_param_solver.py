@@ -19,7 +19,7 @@
 # 1. sktop - deal with UNFINISHED when more than 1 thread
 
 script_name = "bbo_param_solver.py"
-version = '0.11.1'
+version = '0.11.2'
 
 import sys
 import glob
@@ -38,6 +38,7 @@ from skopt.space import Categorical
 
 # A new best point must be at least 1% better than the current best point:
 KOEF_NEW_BEST_POINT = 0.99
+KOEF_INTERRUPTED_PENALTY = 10
 
 skt_opt = None
 
@@ -493,7 +494,7 @@ def collect_result(res):
       generated_points[tuple_point] = PointStatus.INTERRUPTED
       if op.opt_alg != '1+1':
         # Penalty-value of the objective function if interrupted:
-        res = skt_opt.tell(point, best_sum_time*2)
+        res = skt_opt.tell(point, best_sum_time*KOEF_INTERRUPTED_PENALTY)
   # If a new record point is found:
   if (is_all_sat == True and cur_sum_time > 0) and (cur_sum_time < best_sum_time*KOEF_NEW_BEST_POINT or best_sum_time <= 0):
     is_updated = True
