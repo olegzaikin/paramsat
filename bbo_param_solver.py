@@ -19,7 +19,7 @@
 # 1. sktop - deal with UNFINISHED when more than 1 thread
 
 script_name = "bbo_param_solver.py"
-version = '0.11.4'
+version = '0.11.5'
 
 import sys
 import glob
@@ -462,6 +462,7 @@ def collect_result(res):
   global op 
   global skt_opt
   global cnfs_num
+  global penalty_sum_time
   assert(cnfs_num > 0)
   assert(len(res) == 5)
   point = res[0]
@@ -495,9 +496,7 @@ def collect_result(res):
       generated_points[tuple_point] = PointStatus.INTERRUPTED
       if op.opt_alg != '1+1':
         # Penalty-value of the objective function if interrupted:
-        penalty_sum_time = op.max_solver_time * cnfs_num
         res = skt_opt.tell(point, penalty_sum_time)
-        print('Interrupted point got sum_time ' + str(penalty_sum_time))
   finished_points_num = finished(generated_points)
   interrupted_points_num = interrupted(generated_points)
   elapsed_sec = time.time() - start_time
@@ -707,6 +706,9 @@ if __name__ == '__main__':
   for cnf in cnfs:
     print(cnf)
 
+  penalty_sum_time = op.max_solver_time * cnfs_num
+  print('Interrupted points will get sum_time (obj func value) ' + str(penalty_sum_time) + ' seconds')
+
   best_point = copy.deepcopy(def_point)
   # Command for default point:
   best_command = solver_name + ' ' + cnfs[0]
@@ -762,7 +764,7 @@ if __name__ == '__main__':
     assert(needed_new_points_num >= 0)
     assert(needed_new_points_num <= op.cpu_num)
     # If at least one (1+1) point is required:
-    oneplusone_points = []
+    new_points = []
     if needed_new_points_num > 0:
       new_points = ask_points(op.opt_alg, skt_opt, best_point, params, paramsdict, needed_new_points_num, generated_points)
       for p in new_points:
@@ -774,7 +776,7 @@ if __name__ == '__main__':
        if p == def_point:
           is_def_point_to_process = True
     print(str(len(points_to_process)) + ' points to process')
-    print('of them ' + str(len(oneplusone_points)) + ' newly generated points')
+    print('of them ' + str(len(new_points)) + ' newly generated points')
     if is_def_point_to_process:
       print('of them 1 default point to process')
     assert(len(points_to_process) == op.cpu_num)
