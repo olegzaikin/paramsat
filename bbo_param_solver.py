@@ -19,7 +19,7 @@
 # 1. sktop - deal with UNFINISHED when more than 1 thread
 
 script_name = "bbo_param_solver.py"
-version = '0.11.3'
+version = '0.11.4'
 
 import sys
 import glob
@@ -37,8 +37,7 @@ from skopt import Optimizer
 from skopt.space import Categorical
 
 # A new best point must be at least 1% better than the current best point:
-KOEF_NEW_BEST_POINT = 0.99
-KOEF_INTERRUPTED_PENALTY = 10
+COEF_NEW_BEST_POINT = 0.99
 
 skt_opt = None
 
@@ -431,7 +430,7 @@ def calc_obj(solver_name : str, best_sum_time : float, \
     #print('cur_sum_time : ' + str(cur_sum_time))
     # Finish more calculations of points for surrogate-based algorithms:
     if opt_alg == "1+1":
-      if cnf_num < len(cnfs) and best_sum_time > 0 and cur_sum_time >= best_sum_time*KOEF_NEW_BEST_POINT:
+      if cnf_num < len(cnfs) and best_sum_time > 0 and cur_sum_time >= best_sum_time*COEF_NEW_BEST_POINT:
         print('Current obj func value ' + str(cur_sum_time) + ' is already worse than ' + str(best_sum_time))
         print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
         break
@@ -505,8 +504,14 @@ def collect_result(res):
   s = str(finished_points_num) + ' finished points, ' + str(interrupted_points_num) + ' interrupted points, ' + \
     'elapsed ' + str(elapsed_sec)
   print(s)
+  # In case of 1+1, do not move to almost the same record-wise point:
+  if op.opt_alg == '1+1':
+    coef = COEF_NEW_BEST_POINT
+  # Otherwise, move to any record-wise best point:
+  else:
+    coef = 1
   # If a new record point is found:
-  if (is_all_sat == True and cur_sum_time > 0) and (cur_sum_time < best_sum_time*KOEF_NEW_BEST_POINT or best_sum_time <= 0):
+  if (is_all_sat == True and cur_sum_time > 0) and (cur_sum_time < best_sum_time*coef or best_sum_time <= 0):
     is_updated = True
     updates_num += 1
     best_sum_time = cur_sum_time
