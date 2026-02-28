@@ -19,7 +19,7 @@
 # 1. sktop - deal with UNFINISHED when more than 1 thread
 
 script_name = "bbo_param_solver.py"
-version = '0.11.5'
+version = '0.11.6'
 
 import sys
 import glob
@@ -40,6 +40,14 @@ from skopt.space import Categorical
 COEF_NEW_BEST_POINT = 0.99
 
 skt_opt = None
+
+optalg_indices = {
+    "1+1" : 0,
+    "GP" : 1, 
+    "RF" : 2, 
+    "ET" : 3, 
+    "GBRT" : 4
+}
 
 class PointStatus(Enum):
     GENERATED = 0 # a point is generated
@@ -655,7 +663,7 @@ if __name__ == '__main__':
 
   # Force the seed depend on wall time and number of CPU cores.
   # + 1 is needed to avoid multiplying by 0 if the base seed is 0.
-  seed = (op.seed + 1) * op.max_wall_time * op.cpu_num
+  seed = (op.seed + 1) * op.max_wall_time * op.cpu_num + optalg_indices[op.opt_alg]
   random.seed(seed)
   print('Seed ' + str(seed) + ' is formed on the base of initial seed ' + str(op.seed) )
 
