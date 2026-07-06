@@ -6,17 +6,15 @@
 # parameters' values via blackbox optimization algorithms.
 #
 # Example:
-#   python3 ./bbo_param_solver.py ./kissat3 ./kissat3.pcs ./cnfs/ -seed=1 -cpunum=2
+#   python3 ./bbo_param_solver.py ./kissat4 ./kissat4.pcs ./cnfs/ -seed=1
 # 
 # By default the script works in the estimating mode, where new points are generated
 # and processed until a stopping criterion is reached.
-# In the solving mode, cpu_num points are generated and processed until on any of them
-# a solution is found.
 #========================================================================================
 #
 # TODOs:
 # 0. Extend to unsatisfiable CNFs.
-# 1. sktop - deal with UNFINISHED when more than 1 thread
+# 1. Parallel version
 
 script_name = "bbo_param_solver.py"
 version = '0.11.6'
@@ -31,13 +29,9 @@ import math
 import string
 from enum import Enum
 from datetime import datetime
-import multiprocessing as mp
 import numpy as np
 from skopt import Optimizer
 from skopt.space import Categorical
-
-# A new best point must be at least 1% better than the current best point:
-COEF_NEW_BEST_POINT = 0.99
 
 skt_opt = None
 
@@ -53,8 +47,7 @@ class PointStatus(Enum):
     GENERATED = 0 # a point is generated
     STARTED = 1 # a point is generated and the calculation is started on it
     FINISHED = 2 # a point is calculated on all instances
-    INTERRUPTED = 3 # a point is calculated, but at least one instances the SAT solver was interrupted
-    UNFINISHED = 4 # a calculation is unfinished because of new best point 
+    INTERRUPTED = 3 # a point is calculated, but on at least one instance the SAT solver was interrupted
 
 # Input options:
 class Options:
@@ -64,7 +57,6 @@ class Options:
 	max_wall_time = -1
 	max_solver_time = -1
 	defpcs_file = ''
-	cpu_num = 1
 	seed = 0
 	is_solving = False
 	def __init__(self):
@@ -72,7 +64,6 @@ class Options:
 		self.max_points = 1000
 		self.max_wall_time = 86400
 		self.max_solver_time = -1
-		self.cpu_num = 1
 		self.seed = 0
 		self.is_solving = False
 	def __str__(self):
@@ -81,7 +72,6 @@ class Options:
 		'max_points      : ' + str(self.max_points) + '\n' +\
 		'max_wall_time   : ' + str(self.max_wall_time) + '\n' +\
 		'max_solver_time : ' + str(self.max_solver_time) + '\n' +\
-		'cpu_num         : ' + str(self.cpu_num) + '\n' +\
 		'seed            : ' + str(self.seed) + '\n' +\
 		'is_solving      : ' + str(self.is_solving)
 		return s
@@ -100,13 +90,16 @@ class Options:
 				self.max_wall_time = math.ceil(float(p.split('-maxtime=')[1]))
 			if '-maxsolvertime=' in p:
 				self.max_solver_time = math.ceil(float(p.split('-maxsolvertime=')[1]))
-			if '-cpunum=' in p:
-				self.cpu_num = int(p.split('-cpunum=')[1])
 			if '-seed=' in p:
 				self.seed = int(p.split('-seed=')[1])
 			if p == '--solving':
 				self.is_solving = True
-		assert(self.max_points > 0 and self.cpu_num > 0)
+		assert(self.max_points > 0)
+		assert(self.max_wall_time > 0)
+		if self.max_solver_time <= 0:
+			print('No max_solver_time is given, so it is assigned to max_wall_time ' + str(self.max_wall_time))
+			self.max_solver_time = self.max_wall_time
+		assert(self.max_solver_time > 0)
 
 # Solver's parameter:
 class Param:
@@ -126,10 +119,9 @@ def print_usage():
   '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
   '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
   '  -maxsolvertime=<int>   - (default : -1)    maximum SAT solver runtime' + '\n' +\
-  '  -cpunum=<int>          - (default : 1)     number of used CPU cores' + '\n' +\
   '  -seed=<int>            - (default : 0)     seed for pseudorandom generator' + '\n' +\
-  '  --solving              - (default : off)   solving mode' + '\n\n' +\
-  'Points from the -pointsfile are used along with those which are generated.')
+  '  --solving              - (default : off)   solving mode' + '\n' +\
+  'NB: Points from the -pointsfile are used along with those which are generated.')
 
 # Convert string to int if not Boolean:
 def convert_if_int(x : str):
@@ -175,7 +167,6 @@ def read_pcs(param_file_name : str):
 def parse_cdcl_result(cdcl_log : str):
 	t = -1.0
 	sat = -1
-	refuted_leaves = -1
 	lines = cdcl_log.split('\n')
 	for line in lines:
 		if 'c process-time' in line:
@@ -192,14 +183,6 @@ def parse_cdcl_result(cdcl_log : str):
 # Kill a solver:
 def kill_solver(solver : str, generated_points : dict):
   assert(solver != '')
-  print('Killing SAT solver ' + solver)
-  # Mark all currently calculated points as unfinished to let them finish later:
-  new_unfinished_num = 0
-  for point_tuple in generated_points:
-     if generated_points[point_tuple] == PointStatus.STARTED:
-        generated_points[point_tuple] = PointStatus.UNFINISHED
-        new_unfinished_num += 1
-  print('Marked ' + str(new_unfinished_num) + ' started points as unfinished')
   # Form a command line to kill all solver species:
   print('Killing solver ' + solver)
   sys_str = 'killall -9 ' + solver.replace('./','')
@@ -240,103 +223,45 @@ def equalparamval(paramname : str, point1 : list, point2 : list, inddict : dict)
   assert(paramname in inddict)
   return point1[inddict[paramname]] == point2[inddict[paramname]]
 
-# Check if a given point is a possible combination of parameters: 
-def possibcomb(new_point : list, def_point : list, params : list, paramsdict : dict):
-  assert(len(new_point) > 0)
-  assert(len(new_point) == len(def_point))
-  assert(len(new_point) == len(params))
-  # backbone:
-  if 'backbone' in paramsdict and new_point[paramsdict['backbone']] == 0:
-    lst = ['backbonerounds']
-    for name in lst:
-      if name not in paramsdict:
-        continue
-      if not equalparamval(name, new_point, def_point, paramsdict):
-        return False
-  # definitions:
-  if 'definitions' in paramsdict and new_point[paramsdict['definitions']] == 'false':
-    lst = ['definitioncores', 'definitionticks']
-    for name in lst:
-      if name not in paramsdict:
-        continue
-      if not equalparamval(name, new_point, def_point, paramsdict):
-        return False
-  # eliminate:
-  if 'eliminate' in paramsdict and new_point[paramsdict['eliminate']] == 'false':
-    lst = ['eliminatebound', 'eliminateclslim', 'eliminateocclim', \
-      'eliminaterounds', 'forward']
-    for name in lst:
-      if name not in paramsdict:
-        continue
-      if not equalparamval(name, new_point, def_point, paramsdict):
-        return False
-  # substitute:
-  if 'substitute' in paramsdict and new_point[paramsdict['substitute']] == 'false':
-    lst = ['substituteeffort', 'substituterounds']
-    for name in lst:
-      if name not in paramsdict:
-        continue
-      if not equalparamval(name, new_point, def_point, paramsdict):
-        return False
-  # vivify:
-  if 'vivify' in paramsdict and new_point[paramsdict['vivify']] == 'false':
-    lst = ['vivifytier1', 'vivifytier2']
-    for name in lst:
-      if name not in paramsdict:
-        continue
-      if not equalparamval(name, new_point, def_point, paramsdict):
-        return False
-  return True
-
 # Generate new points via (1+1)-EA or ask-tell interface:
-def ask_points(opt_alg : str, skt_opt, cur_best_point : list, params : list, paramsdict : dict, \
-               points_num_to_gen : int, generated_points : dict):
-  assert(len(best_point) == len(params))
-  assert(points_num_to_gen >= 0)
+def ask_points(skt_opt, points_num_to_gen : int):
   global random
   global def_point
   global skipped_points_num
   global skipped_impos_num
   global repeatedly_generated_points
+  global generated_points
+  global params
+  global paramsdict
+  global op
+  global best_point
+  assert(len(best_point) == len(params))
+  assert(points_num_to_gen >= 0)
   if points_num_to_gen == 0:
     return []
   new_points = []
-  if opt_alg == "1+1":
+  if op.opt_alg == "1+1":
      # Change each value with probability:
     while len(new_points) < points_num_to_gen:
-        pnt = copy.deepcopy(cur_best_point)
+        pnt = copy.deepcopy(best_point)
         # With probability 36 % the point is the same, so do until it is a new one:
-        while pnt == cur_best_point:
+        while pnt == best_point:
           for i in range(len(params)):
             prob = random.random()
             if (prob <= 1/len(params)):
               pnt[i] = next_value(params[i].values, pnt[i])
-        assert(pnt != cur_best_point)
-        # Check if point is an impossible combination:
-        #if not possibcomb(pnt, def_point, params, paramsdict):
-          #print('Impossible combination:')
-          #print(strlistrepr(pnt))
-          #skipped_impos_num += 1
-          #print(str(skipped_impos_num) + ' impossible points skipped')
-          #continue
+        assert(pnt != best_point)
         point_tuple = tuple(pnt)
         # If point has been already generated:
         if point_tuple in generated_points:
-          # If point was already generated but calculation is unfinished:
-          if generated_points[point_tuple] == PointStatus.UNFINISHED:
-            # Change the status to 'generated' to finish the calculation:
-            generated_points[point_tuple] = PointStatus.GENERATED
-            repeatedly_generated_points += 1
-            new_points.append(pnt)
-          else:
-            # The calculation is finished or the point is just generated:
-            skipped_points_num += 1
-            #print(str(skipped_points_num) + ' repeated points skipped')
+          # The calculation is finished or the point is just generated:
+          skipped_points_num += 1
+          #print(str(skipped_points_num) + ' repeated points skipped')
         else:
           # New point and possible combination:
           generated_points[point_tuple] = PointStatus.GENERATED
           new_points.append(pnt)
-  elif opt_alg != "1+1": # "GP", "RF", "ET", "GBRT"
+  elif op.opt_alg != "1+1": # "GP", "RF", "ET", "GBRT"
     new_points_npint64 = skt_opt.ask(n_points=points_num_to_gen)
     #print(generated_points)
     #print(new_points_npint64)
@@ -346,7 +271,7 @@ def ask_points(opt_alg : str, skt_opt, cur_best_point : list, params : list, par
     for p in new_points_npint64:
       new_points.append([int(x) for x in p])
     for p in new_points:
-      assert(p != cur_best_point)
+      assert(p != best_point)
       point_tuple = tuple(p)
       # Each ask must be completed by tell, so no same points:
       assert(point_tuple not in generated_points)
@@ -367,43 +292,56 @@ def points_diff(p1 : list, p2 : list, params : list):
     res_str = res_str[:-1]  
   return res_str
 
+
+# Calc objective function and process results:
+def calc_obj_collect_result(solver_name : str, point : list):
+    res = calc_obj(solver_name, point)
+    collect_result(res[0], res[1], res[2], res[3], res[4])
+
 # Run solver on a given point:
-def calc_obj(solver_name : str, best_sum_time : float, \
-  max_instance_time_best_point : float, \
-  initial_max_solver_time : float, opt_alg : str, cnfs : list, \
-  params : list, point : list, is_solving : bool, \
-  start_time : float, max_wall_time : float):
+def calc_obj(solver_name : str, point : list):
+  global op
+  global params
+  global start_time
+  global generated_points
   assert(len(params) > 1)
   assert(len(params) == len(point))
   assert(len(cnfs) > 0)
+  # A point to calculate must be marked as GENERATED:
+  tuple_point = tuple(point)
+  assert(generated_points[tuple_point] == PointStatus.GENERATED)
+  # Mark that the calculation is STARTED:
+  generated_points[tuple_point] = PointStatus.STARTED
   cur_sum_time = 0.0
   max_instance_time = -1
   is_all_sat = True
-  # Solver's time limit on each CNF is the current best obj func value:
-  if opt_alg == "1+1":
-    if max_instance_time_best_point > 0:
-      solver_time_lim = max_instance_time_best_point
-    else:
-      solver_time_lim = best_sum_time
-  # Finish more calculations of points for surrogate-based algorithms:
-  else:
-    if initial_max_solver_time > 0:
-      solver_time_lim = initial_max_solver_time
-    else:
-      solver_time_lim = best_sum_time
-  #print('solver_time_lim : ' + str(solver_time_lim))
   # Calculate sum for the solver runtimes:
   cnf_num = 0
   sat_num = 0
+  sys_str = ''
+  assert(op.max_solver_time <= op.max_wall_time)
+  # Calculate a basic time limit for the solver:
+  solver_time_lim = op.max_wall_time
+  if op.max_solver_time < op.max_wall_time:
+    assert(op.max_solver_time > 0)
+    solver_time_lim = op.max_solver_time
+  # Process each CNF from the sample:
   for cnf_file_name in cnfs:
     cnf_num += 1
     sys_str = ''
-    if solver_time_lim > 0:
-      rounded_solver_time_lim = math.ceil(solver_time_lim)
-      assert(rounded_solver_time_lim > 0)
-      sys_str = solver_name + ' --time=' + str(rounded_solver_time_lim) + ' '
-    else:
-      sys_str = solver_name + ' '
+    # If any current best sum time is known, additionally limit the solver;
+    # give it t+1 seconds where t is time for reaching the current best sum time:
+    if best_sum_time > 0:
+       elapsed_time_best_sum_time = best_sum_time - cur_sum_time
+       if elapsed_time_best_sum_time < solver_time_lim:
+          solver_time_lim = elapsed_time_best_sum_time
+          #print('New solver_time_lim ' + str(solver_time_lim) + \
+          #      ' is equal to elapsed time for reaching the current best sum time ' + \
+          #      str(best_sum_time) + ' , cur_sum_time : ' + str(cur_sum_time))
+    assert(solver_time_lim > 0)
+    rounded_solver_time_lim = math.ceil(solver_time_lim)
+    assert(rounded_solver_time_lim > 0)
+    sys_str = solver_name + ' --time=' + str(rounded_solver_time_lim) + ' '
     for i in range(len(params)):
       sys_str += '--' + params[i].name + '=' + str(point[i]) + ' '
     sys_str += cnf_file_name
@@ -425,7 +363,7 @@ def calc_obj(solver_name : str, best_sum_time : float, \
       max_instance_time = t if max_instance_time < t else max_instance_time
       #print('Time : ' + str(t) + ' on CNF ' + cnf_file_name)
       # In solving mode, the CDCL solver's log should be saved:
-      if is_solving:
+      if op.is_solving:
         assert('.cnf' in cnf_file_name)
         cdcl_log_file_name = 'log_' + solver_name.replace('./','') + '_' + os.path.basename(cnf_file_name.split('.cnf')[0])
         now = datetime.now()
@@ -437,13 +375,13 @@ def calc_obj(solver_name : str, best_sum_time : float, \
     #print('sum_time : ' + str(best_sum_time))
     #print('cur_sum_time : ' + str(cur_sum_time))
     # Finish more calculations of points for surrogate-based algorithms:
-    if opt_alg == "1+1":
-      if cnf_num < len(cnfs) and best_sum_time > 0 and cur_sum_time >= best_sum_time*COEF_NEW_BEST_POINT:
+    if op.opt_alg == "1+1":
+      if cnf_num < len(cnfs) and best_sum_time > 0 and cur_sum_time >= best_sum_time:
         print('Current obj func value ' + str(cur_sum_time) + ' is already worse than ' + str(best_sum_time))
         print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
         break
     elapsed_time = round(time.time() - start_time, 2)
-    if elapsed_time >= max_wall_time:
+    if elapsed_time >= op.max_wall_time:
       print('Wall time limit is reached while calculating objective function')
       print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
       break
@@ -454,14 +392,15 @@ def calc_obj(solver_name : str, best_sum_time : float, \
   #print('Obj func value : ' + str(cur_sum_time))
   return point, cur_sum_time, max_instance_time, is_all_sat, sys_str
 
+
 # Collect a result produced by solver:
-def collect_result(res):
+def collect_result(point : list, cur_sum_time : float, max_instance_time : float, is_all_sat : bool, command : str):
   global updates_num
   global default_sum_time
+  global max_instance_time_best_point
   global best_sum_time
   global best_point
   global best_command
-  global max_instance_time_best_point
   global def_point
   global params
   global start_time
@@ -472,34 +411,21 @@ def collect_result(res):
   global cnfs_num
   global penalty_sum_time
   assert(cnfs_num > 0)
-  assert(len(res) == 5)
-  point = res[0]
-  cur_sum_time = res[1]
-  max_wall_time = res[2]
-  is_all_sat = res[3]
-  command = res[4]
   # If interrupted, then not all instances are satisfiable:
   assert(cur_sum_time > 0 or (cur_sum_time < 0 and not is_all_sat))
   #print('Sum time in collect_result : ' + str(cur_sum_time) + ' seconds')
   #print('max_wall_time : ' + str(max_wall_time) + ' seconds')
   tuple_point = tuple(point)
-  assert(generated_points[tuple_point] == PointStatus.STARTED or generated_points[tuple_point] == PointStatus.UNFINISHED)
+  assert(generated_points[tuple_point] == PointStatus.STARTED)
   # Three cases:
   # 1) A SAT solver was interrupted on a CNF due to a time limit, so STARTED -> INTERRUPTED
-  # 2) A SAT solver was interrupted on a CNF since a new record is found (and then kill_solver() 
-  #      marked all current points as UNFINISHED), do not change the status UNFINISHED to let this 
-  #      point be processed again later.
-  # 3) All CNFs are processed, and the point is marked STARTED, so STARTED -> FINISHED
-  # 4) All CNFs are processed, and the point is marked UNFINISHED by kill_solver(), so UNFINISHED -> FINISHED
+  # 2) All CNFs are processed, and the point is marked STARTED, so STARTED -> FINISHED
   if is_all_sat == True:
     generated_points[tuple_point] = PointStatus.FINISHED
-    print('Finished points with sum_time ' + str(cur_sum_time) + ' , max_inst_time ' + str(max_wall_time))
+    print('Finished points with sum_time ' + str(cur_sum_time) + ' , max_inst_time ' + str(max_instance_time))
     if op.opt_alg != '1+1':
       res = skt_opt.tell(point, cur_sum_time)
   else:
-    # If a new best point is found and all current points are interrupted by killing their solvers,
-    # then these points already have the status 'unfinished', so do not change their status here.
-    # Otherwise, the status is changed:
     if generated_points[tuple_point] == PointStatus.STARTED:
       generated_points[tuple_point] = PointStatus.INTERRUPTED
       if op.opt_alg != '1+1':
@@ -511,23 +437,16 @@ def collect_result(res):
   s = str(finished_points_num) + ' finished points, ' + str(interrupted_points_num) + ' interrupted points, ' + \
     'elapsed ' + str(elapsed_sec)
   print(s)
-  # In case of 1+1, do not move to almost the same record-wise point:
-  if op.opt_alg == '1+1':
-    coef = COEF_NEW_BEST_POINT
-  # Otherwise, move to any record-wise best point:
-  else:
-    coef = 1
   # If a new record point is found:
-  if (is_all_sat == True and cur_sum_time > 0) and (cur_sum_time < best_sum_time*coef or best_sum_time <= 0):
+  if (is_all_sat == True and cur_sum_time > 0) and (cur_sum_time < best_sum_time or best_sum_time <= 0):
     is_updated = True
     updates_num += 1
     best_sum_time = cur_sum_time
     best_point = copy.deepcopy(point)
     best_command = command
-    max_instance_time_best_point = max_wall_time
+    max_instance_time_best_point = max_instance_time
     elapsed_time = round(time.time() - start_time, 2)
-    print('')
-    print('Updated best sum time : ' + str(best_sum_time))
+    print('*** Updated best sum time : ' + str(best_sum_time))
     print('max_instance_time_best_point : ' + str(max_instance_time_best_point))
     print('elapsed : ' + str(elapsed_time) + ' seconds')
     if def_point == best_point:
@@ -541,6 +460,7 @@ def collect_result(res):
       print(diff_str)
     print(best_command + '\n')
 
+
 # Read all CNFs in a given folder:
 def read_cnfs(cnfs_folder_name : str):
   cnfs = list()
@@ -549,6 +469,7 @@ def read_cnfs(cnfs_folder_name : str):
     assert('.cnf' in f)
     cnfs.append(f)
   return cnfs
+
 
 # String-representation of a given point:
 def strlistrepr(lst : list):
@@ -620,7 +541,6 @@ def stat(generated_points : dict):
   started_num = 0
   finished_num = 0
   interrupted_num = 0
-  unfinished_num = 0
   for point_tuple in generated_points:
       if generated_points[point_tuple] == PointStatus.GENERATED:
          generated_num += 1
@@ -630,13 +550,10 @@ def stat(generated_points : dict):
          finished_num += 1
       elif generated_points[point_tuple] == PointStatus.INTERRUPTED:
          interrupted_num += 1
-      elif generated_points[point_tuple] == PointStatus.UNFINISHED:
-         unfinished_num += 1
   res = str(generated_num) + ' generated\n' + \
     str(started_num) + ' started\n' + \
     str(finished_num) + ' finished\n' + \
-    str(interrupted_num) + ' interrupted\n' + \
-    str(unfinished_num) + ' unfinished\n'
+    str(interrupted_num) + ' interrupted\n'
   return res
 
 # Main function:
@@ -663,7 +580,7 @@ if __name__ == '__main__':
 
   # Force the seed depend on wall time and number of CPU cores.
   # + 1 is needed to avoid multiplying by 0 if the base seed is 0.
-  seed = (op.seed + 1) * op.max_wall_time * op.cpu_num + optalg_indices[op.opt_alg]
+  seed = (op.seed + 1) * op.max_wall_time + optalg_indices[op.opt_alg]
   random.seed(seed)
   print('Seed ' + str(seed) + ' is formed on the base of initial seed ' + str(op.seed) )
 
@@ -680,12 +597,7 @@ if __name__ == '__main__':
   for param in params:
      skt_opt_space.append(Categorical(param.values, name=param.name))
 
-  estimator_type = 'GP'
-  if op.opt_alg != "1+1":
-     estimator_type = op.opt_alg
-     print('sktopt estimator type : ' + estimator_type)
-  skt_opt = Optimizer(skt_opt_space, base_estimator=estimator_type, n_initial_points=10, random_state=seed)
-
+  # Form a default point:
   def_point = list()
   total_val_num = 0
   for prm in params:
@@ -696,16 +608,16 @@ if __name__ == '__main__':
   assert(len(def_point) == len(params))
   print('Default point :')
   print(str(def_point))
-
+  # Form a dictionary of parameters' indices:
   total_val_num = 0
   print(str(len(params)) + ' parameters')
-
   paramsdict = dict()
   for i in range(len(params)):
     paramsdict[params[i].name] = i
   print('Dictionary of parameters :')
   print(paramsdict)  
 
+  # Read CNFs:
   cnfs = []
   cnfs = read_cnfs(cnfs_folder_name)
   cnfs_num = len(cnfs)
@@ -714,8 +626,19 @@ if __name__ == '__main__':
   for cnf in cnfs:
     print(cnf)
 
-  penalty_sum_time = op.max_solver_time * cnfs_num
-  print('Interrupted points will get sum_time (obj func value) ' + str(penalty_sum_time) + ' seconds')
+  # Initialize sktopt optimizer if needed:
+  if op.opt_alg != "1+1":
+     if op.max_solver_time <= 0:
+        print('In skopt mode, a maximum solver time must be given')
+        exit(1)
+     estimator_type = op.opt_alg
+     print('sktopt estimator type : ' + estimator_type)
+     # As recommended, the number of initial points is d+1, where d is the number of variables:
+     init_points_num = len(params) + 1
+     print('init_points_num : ' + str(init_points_num))
+     skt_opt = Optimizer(skt_opt_space, base_estimator=estimator_type, n_initial_points=init_points_num, random_state=seed)
+     penalty_sum_time = op.max_solver_time * cnfs_num
+     print('Interrupted points will get sum_time (obj func value) ' + str(penalty_sum_time) + ' seconds')
 
   best_point = copy.deepcopy(def_point)
   # Command for default point:
@@ -730,124 +653,55 @@ if __name__ == '__main__':
 
   processed_points_num = 0
   prev_processed_points_num = 0
-  # A dictionary of generated points, where a tuple representation of the
-  # point's parameters values is an ID, while the VALUE is a point's status:
-  generated_points = dict()
-  start_points = []
-  # In runtime on default point is given, mark it as finished:
-  if default_sum_time > 0:
-    processed_points_num = 1 # the default point is processed
-    tuple_point = tuple(def_point)
-    generated_points[tuple_point] = PointStatus.FINISHED
-    assert(len(generated_points) == 1)
-    assert(default_sum_time > 0)
-    print('The default point is marked as finished.')
-  else:
-    # otherwise, add the default point to the queue for processing:
-    start_points.append(def_point) # earlier, sat- and unsat- points from Kissat were added here
-
   skipped_points_num = 0
   skipped_impos_num = 0
   repeatedly_generated_points = 0
   updates_num = 0
   iter = 0
-  max_instance_time_best_point = op.max_solver_time
   is_extern_break = False
   elapsed_time = 0
+  max_instance_time_best_point = -1
 
-  # Repeat until all points a processed:
+  # A dictionary of generated points, where a tuple representation of the
+  # point's parameters values is an ID, while the VALUE is a point's status:
+  generated_points = dict()
+  # In runtime on default point is given, mark it as finished:
+  point_tuple = tuple(def_point)
+  if default_sum_time > 0:
+    processed_points_num = 1 # the default point is processed
+    generated_points[point_tuple] = PointStatus.FINISHED
+    assert(len(generated_points) == 1)
+    print('The default point is given, so it is marked as finished.')
+  else:
+    # otherwise, add the default point to the queue for processing:
+    generated_points[point_tuple] = PointStatus.GENERATED
+    calc_obj_collect_result(solver_name, def_point)
+
+  # Repeat until all points are processed:
   while processed_points_num < op.max_points and elapsed_time < op.max_wall_time:
-    print('\n*** iter : ' + str(iter))
+    print('*** iter : ' + str(iter))
     elapsed_time = round(time.time() - start_time, 2)
     print('elapsed : ' + str(elapsed_time) + ' seconds')
-    points_to_process = []
-    # Process start points only on the first iteration:
-    if iter == 0:
-      for p in start_points:
-        assert(len(p) == len(params))
-        points_to_process.append(p)
-        tuple_point = tuple(p)
-        generated_points[tuple_point] = PointStatus.GENERATED  
-    needed_new_points_num = op.cpu_num - len(points_to_process)
-    assert(needed_new_points_num >= 0)
-    assert(needed_new_points_num <= op.cpu_num)
-    # If at least one (1+1) point is required:
-    new_points = []
-    if needed_new_points_num > 0:
-      new_points = ask_points(op.opt_alg, skt_opt, best_point, params, paramsdict, needed_new_points_num, generated_points)
-      for p in new_points:
-        assert(len(p) == len(params))
-        points_to_process.append(p)
-    assert(len(points_to_process) == op.cpu_num)
-    is_def_point_to_process = False
-    for p in points_to_process:
-       if p == def_point:
-          is_def_point_to_process = True
-    print(str(len(points_to_process)) + ' points to process')
-    print('of them ' + str(len(new_points)) + ' newly generated points')
-    if is_def_point_to_process:
-      print('of them 1 default point to process')
-    assert(len(points_to_process) == op.cpu_num)
-    pool = mp.Pool(op.cpu_num)
+    # Ask for a new point:
+    points_to_process = ask_points(skt_opt, 1)
+    assert(len(points_to_process) == 1)
     is_updated = False
-    # Start processing the first batch of points:
-    for p in points_to_process:
-      assert(len(p) == len(params))
-      # Check the point's status:
-      tuple_point = tuple(p)
-      assert(generated_points[tuple_point] == PointStatus.GENERATED)
-      # Mark that the calculation is started:
-      generated_points[tuple_point] = PointStatus.STARTED
-      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, op.max_solver_time, op.opt_alg, cnfs, params, p, op.is_solving, start_time, op.max_wall_time), callback=collect_result)
-    is_inner_break = False
-    # Repeat until a new record is found or the processed points limit is reached:
-    while True:
-      while len(pool._cache) >= op.cpu_num: # wait until any CPU core is free
-        time.sleep(1)
-      elapsed_time = round(time.time() - start_time, 2)
-      processed_points_num = processed(generated_points)
-      if processed_points_num % 100 == 0 and processed_points_num != prev_processed_points_num:
-        assert(processed_points_num > prev_processed_points_num)
-        print(str(processed_points_num) + ' points are processed;  elapsed : ' + str(elapsed_time) + ' seconds')
-        #print(stat(generated_points))
-        prev_processed_points_num = processed_points_num
-      if processed_points_num >= op.max_points:
-        print('The limit on the number of points is reached, break.')
-        is_inner_break = True
-      elif elapsed_time >= op.max_wall_time:
-        print('The time limit is reached, break.')
-        is_inner_break = True
-      if is_updated:
-        assert(best_sum_time > 0)
-        if op.is_solving:
-          # 1 solution is enough in the solving mode:
-          print('Breaking the main loop because a solution is found in the solving mode.')
-          assert(iter == 0)
-          is_extern_break = True
-        is_updated = False
-        is_inner_break = True
-      if is_inner_break:
-        print('Break inner loop.')
-        # Don't kill solver in the sequential mode:
-        if op.cpu_num > 1:
-          while len(pool._cache) > 0:
-            kill_solver(solver_name, generated_points)
-            time.sleep(1)
-        pool.close()
-        pool.join()
-        break
-      # A CPU core is free, so generate a new point and process it:
-      one_point_list = ask_points(op.opt_alg, skt_opt, best_point, params, paramsdict, 1, generated_points)
-      assert(len(one_point_list) == 1)
-      # Check the point's status:
-      tuple_point = tuple(one_point_list[0])
-      assert(generated_points[tuple_point] == PointStatus.GENERATED)
-      # Mark that the calculation is started:
-      generated_points[tuple_point] = PointStatus.STARTED
-      pool.apply_async(calc_obj, args=(solver_name, best_sum_time, max_instance_time_best_point, op.max_solver_time, op.opt_alg, cnfs, params, one_point_list[0], op.is_solving, start_time, op.max_wall_time), callback=collect_result)
-    if is_extern_break:
-       print('Break main loop')
-       break
+    # Check the point's status:
+    tuple_point = tuple(points_to_process[0])
+    calc_obj_collect_result(solver_name, points_to_process[0])
+    elapsed_time = round(time.time() - start_time, 2)
+    processed_points_num = processed(generated_points)
+    if processed_points_num % 100 == 0 and processed_points_num != prev_processed_points_num:
+      assert(processed_points_num > prev_processed_points_num)
+      print(str(processed_points_num) + ' points are processed;  elapsed : ' + str(elapsed_time) + ' seconds')
+      #print(stat(generated_points))
+      prev_processed_points_num = processed_points_num
+    if processed_points_num >= op.max_points:
+      print('The limit on the number of points is reached, break.')
+      break
+    elif elapsed_time >= op.max_wall_time:
+      print('The time limit is reached, break.')
+      break
     iter += 1
 
   # Write generated points:
