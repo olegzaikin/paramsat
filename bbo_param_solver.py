@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.11.6'
+version = '0.12.0'
 
 import sys
 import glob
