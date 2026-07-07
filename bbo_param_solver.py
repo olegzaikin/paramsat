@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.12.0'
+version = '0.12.1'
 
 import sys
 import glob
@@ -332,6 +332,7 @@ def calc_obj(solver_name : str, point : list):
     # If any current best sum time is known, additionally limit the solver;
     # give it t+1 seconds where t is time for reaching the current best sum time:
     if best_sum_time > 0:
+       assert(cur_sum_time < best_sum_time)
        elapsed_time_best_sum_time = best_sum_time - cur_sum_time
        if elapsed_time_best_sum_time < solver_time_lim:
           solver_time_lim = elapsed_time_best_sum_time
@@ -361,6 +362,8 @@ def calc_obj(solver_name : str, point : list):
       # Only if a CNF is solved in time limit:
       cur_sum_time += t
       max_instance_time = t if max_instance_time < t else max_instance_time
+      if cur_sum_time >= best_sum_time:
+         break
       #print('Time : ' + str(t) + ' on CNF ' + cnf_file_name)
       # In solving mode, the CDCL solver's log should be saved:
       if op.is_solving:
