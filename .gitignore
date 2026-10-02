@@ -5,10 +5,10 @@ help
 range*
 *.pcs
 out*
-kissat3
-kissat3_*
+kissat*
 generated*
 final*
 log*
 points*
 a.out
+cnfs_easy/
