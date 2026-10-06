@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.13.3'
+version = '0.13.4'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -504,6 +504,7 @@ def read_cnfs(cnfs_dir_name : str):
   for f in glob.glob(cnfs_dir_name + '/*.cnf'):
     assert('.cnf' in f)
     cnfs.append(f)
+  cnfs.sort()
   return cnfs
 
 
