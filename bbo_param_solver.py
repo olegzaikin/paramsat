@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.13.2'
+version = '0.13.3'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -480,21 +480,21 @@ def collect_result(res : tuple):
   # Two cases:
   # 1) The point is calculated, and the point is marked STARTED, so STARTED -> FINISHED
   # 2) A point is interrupted, so STARTED -> INTERRUPTED
+  tell_time = cur_sum_time
   if is_interrupted_point == False:
     assert(cur_sum_time > 0)
     generated_points[tuple_point] = PointStatus.FINISHED
     if cur_sum_time > best_sum_time:
        worse_than_best_but_calc_points_num += 1
     print('Finished point with sum_time ' + str(cur_sum_time) + ' , max_inst_time ' + str(max_instance_time))
-    if op.opt_alg != '1+1':
-      res = skt_opt.tell(point, cur_sum_time)
   else:
     penalty_sum_time = best_sum_time * BOUND_MULTIPLIER
+    tell_time = penalty_sum_time
     assert(penalty_sum_time > 0)
     generated_points[tuple_point] = PointStatus.INTERRUPTED
-    if op.opt_alg != '1+1':
-      # Penalty-value of the objective function if interrupted:
-      res = skt_opt.tell(point, penalty_sum_time)
+  # Tell SKOPT the objective function value:
+  if 'SKOPT-' in op.opt_alg:
+    res = skt_opt.tell(point, tell_time)
 
 
 # Read all CNFs in a given dir:
