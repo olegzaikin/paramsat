@@ -1,5 +1,5 @@
-timelim=300
-pointslim=100
+timelim=180
+pointslim=50
 for alg in SKOPT-ET SKOPT-RF SKOPT-GBRT SKOPT-GP 1+1
 do
     echo $alg

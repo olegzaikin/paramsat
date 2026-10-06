@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.13.4'
+version = '0.13.5'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -367,7 +367,10 @@ def calc_obj(point : list):
       assert(solver_time_lim > 0)
       rounded_solver_time_lim = math.ceil(solver_time_lim)
       assert(rounded_solver_time_lim > 0)
-      sys_str = op.solver_name + ' --time=' + str(rounded_solver_time_lim) + ' '
+      sys_str = op.solver_name
+      if 'kissat' in op.solver_name:
+         sys_str += ' -n' # do not print satisfying assignment to save time
+      sys_str += ' --time=' + str(rounded_solver_time_lim) + ' '
       for i in range(len(params)):
         sys_str += '--' + params[i].name + '=' + str(point[i]) + ' '
       sys_str += cnf_file_name
