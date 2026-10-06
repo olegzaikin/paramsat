@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.13.1'
+version = '0.13.2'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -716,8 +716,14 @@ if __name__ == '__main__':
     calc_obj_collect_result(def_point)
     assert(max_instance_time_best_point > 0)
     assert(max_instance_time_best_point < op.max_wall_time)
-    op.max_solver_time = max_instance_time_best_point
-    print('max_solver_time was changed to ' + str(max_instance_time_best_point))
+
+  # If maximum solver time is not set, assing what is available:
+  if op.max_solver_time < 0:
+    if max_instance_time_best_point > 0:
+      op.max_solver_time = max_instance_time_best_point
+    else:
+      op.max_solver_time = op.max_wall_time
+  print('max_solver_time is not set, so it was changed to ' + str(op.max_solver_time))
 
   assert(len(generated_points) == 1)
   assert(op.max_solver_time > 0)
