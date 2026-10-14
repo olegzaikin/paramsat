@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.13.6'
+version = '0.13.7'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -347,36 +347,33 @@ def calc_obj(point : list):
     assert('.cnf' in cnf_file_name)
     cnf_num += 1
     sys_str = ''
-    # If any current best sum time is known, additionally limit the solver;
-    # give it t+1 seconds where t is time for reaching the current best sum time:
-    if best_sum_time > 0:
-       elapsed_time_best_sum_time = best_sum_time - cur_sum_time
-       if elapsed_time_best_sum_time < solver_time_lim:
-          solver_time_lim = elapsed_time_best_sum_time
     # Check the left time:
     elapsed_time = round(time.time() - start_time, 2)
     avail_time = op.max_wall_time - elapsed_time
     # If no time is left, do not run the solver:
-    t, sat = 0, 1
+    if avail_time <= 0:
+      print('Break: negative available wall time ' + str(avail_time))
+      is_interrupted_point = True
+      break
+    # Update the solver limit to not exceed the wall limit:
+    if avail_time < solver_time_lim:
+      assert(avail_time > 0)
+      solver_time_lim = avail_time
+    assert(solver_time_lim > 0)
+    rounded_solver_time_lim = math.ceil(solver_time_lim)
+    assert(rounded_solver_time_lim > 0)
+    sys_str = op.solver_name
+    if 'kissat' in op.solver_name:
+        sys_str += ' -n' # do not print satisfying assignment to save time
+    sys_str += ' --time=' + str(rounded_solver_time_lim) + ' '
+    for i in range(len(params)):
+      sys_str += '--' + params[i].name + '=' + str(point[i]) + ' '
+    sys_str += cnf_file_name
+    #print(sys_str)
     cdcl_log = ''
-    # Enough time, run the solver:
-    if avail_time > 0:
-      # Update the solver limit to not exceed the wall limit:
-      if avail_time < solver_time_lim:
-        solver_time_lim = avail_time
-      assert(solver_time_lim > 0)
-      rounded_solver_time_lim = math.ceil(solver_time_lim)
-      assert(rounded_solver_time_lim > 0)
-      sys_str = op.solver_name
-      if 'kissat' in op.solver_name:
-         sys_str += ' -n' # do not print satisfying assignment to save time
-      sys_str += ' --time=' + str(rounded_solver_time_lim) + ' '
-      for i in range(len(params)):
-        sys_str += '--' + params[i].name + '=' + str(point[i]) + ' '
-      sys_str += cnf_file_name
-      #print(sys_str)
-      cdcl_log = subprocess.run(sys_str, shell=True, capture_output=True, text=True).stdout
-      t, sat = parse_cdcl_result(cdcl_log)
+    t, sat = -1, 0
+    cdcl_log = subprocess.run(sys_str, shell=True, capture_output=True, text=True).stdout
+    t, sat = parse_cdcl_result(cdcl_log)
     assert(t >= 0)
     # Expect SAT or INTERR, while UNSAT is not a valid answer: 
     assert(sat == -1 or sat == 1)
