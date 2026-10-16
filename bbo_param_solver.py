@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.13.7'
+version = '0.13.8'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -356,8 +356,8 @@ def calc_obj(point : list):
       is_interrupted_point = True
       break
     # Update the solver limit to not exceed the wall limit:
-    if avail_time < solver_time_lim:
-      assert(avail_time > 0)
+    if best_sum_time > 0 and (avail_time > 0 and avail_time < solver_time_lim):
+      print('Changing solver time limit to available wall time ' + str(avail_time))
       solver_time_lim = avail_time
     assert(solver_time_lim > 0)
     rounded_solver_time_lim = math.ceil(solver_time_lim)
@@ -453,8 +453,9 @@ def collect_result(res : tuple):
   s = str(finished_points_num) + ' finished points, ' + str(interrupted_points_num) + ' interrupted points, ' + \
     'elapsed ' + str(elapsed_sec)
   print(s)
+
   # If a new record point is found:
-  if cur_sum_time > 0 and (cur_sum_time < best_sum_time or best_sum_time <= 0):
+  if (is_interrupted_point == False and cur_sum_time > 0) and (cur_sum_time < best_sum_time or best_sum_time <= 0):
     is_updated = True
     updates_num += 1
     best_sum_time = cur_sum_time
@@ -475,8 +476,7 @@ def collect_result(res : tuple):
       assert(diff_str != '')
       print('Difference from the default point :')
       print(diff_str + '\n')
-  # Calculate a 2 x cur-best-time penalty for interuupted points as in ParamILS and SMAC:
-  assert(best_sum_time > 0)
+  
   # Two cases:
   # 1) The point is calculated, and the point is marked STARTED, so STARTED -> FINISHED
   # 2) A point is interrupted, so STARTED -> INTERRUPTED
@@ -484,10 +484,13 @@ def collect_result(res : tuple):
   if is_interrupted_point == False:
     assert(cur_sum_time > 0)
     generated_points[tuple_point] = PointStatus.FINISHED
-    if cur_sum_time > best_sum_time:
-       worse_than_best_but_calc_points_num += 1
+    if cur_sum_time > best_sum_time and best_sum_time > 0:
+        worse_than_best_but_calc_points_num += 1
     print('Finished point with sum_time ' + str(cur_sum_time) + ' , max_inst_time ' + str(max_instance_time))
   else:
+    # Calculate a 2 x cur-best-time penalty for interuupted points as in ParamILS and SMAC:
+    assert(best_sum_time > 0)
+    assert(BOUND_MULTIPLIER >= 1)
     penalty_sum_time = best_sum_time * BOUND_MULTIPLIER
     tell_time = penalty_sum_time
     assert(penalty_sum_time > 0)
@@ -495,6 +498,7 @@ def collect_result(res : tuple):
   # Tell SKOPT the objective function value:
   if 'SKOPT-' in op.opt_alg:
     res = skt_opt.tell(point, tell_time)
+  assert(best_sum_time > 0)
 
 
 # Read all CNFs in a given dir:
@@ -699,6 +703,12 @@ if __name__ == '__main__':
 
   updates_num = 0
   max_instance_time_best_point = -1
+  skipped_points_num = 0
+  prev_processed_points_num = 0
+  worse_than_best_but_calc_points_num = 0
+  processed_points_num = 0
+  iter = 1 # iter 0 is the default point
+  elapsed_time = 0
 
   # A dictionary of generated points, where a tuple representation of the
   # point's parameters values is an ID, while the VALUE is a point's status:
@@ -729,12 +739,6 @@ if __name__ == '__main__':
   assert(len(generated_points) == 1)
   assert(op.max_solver_time > 0)
 
-  skipped_points_num = 0
-  prev_processed_points_num = 0
-  worse_than_best_but_calc_points_num = 0
-  processed_points_num = 0
-  iter = 1 # iter 0 is the default point
-  elapsed_time = 0
   print('*** iter 0 was spent on the default point')
 
   # Repeat until all points are processed:
