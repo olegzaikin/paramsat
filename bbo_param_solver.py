@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.13.8'
+version = '0.14.0'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -35,17 +35,22 @@ import subprocess
 from enum import Enum
 from datetime import datetime
 import numpy as np
+import types
 from skopt import Optimizer
 from skopt.space import Categorical
+import optuna
+from optuna.distributions import CategoricalDistribution
 
 skt_opt = None
+optuna_study = None
+optuna_trial = None
 
 optalg_indices = {
     "1+1" : 0,
-    "SKOPT-GP" : 1, 
-    "SKOPT-RF" : 2, 
-    "SKOPT-ET" : 3, 
-    "SKOPT-GBRT" : 4
+    "SKOPT-RF" : 1, 
+    "SKOPT-ET" : 2, 
+    "SKOPT-GBRT" : 3,
+    "Optuna-TPE" : 4
 }
 
 class PointStatus(Enum):
@@ -90,7 +95,7 @@ class Options:
 				tmp = p.split('-optalg=')[1]
 				tmp = tmp.replace("'", "")
 				self.opt_alg = tmp.replace('"', '')
-				assert(self.opt_alg in ["1+1", "SKOPT-GP", "SKOPT-RF", "SKOPT-ET", "SKOPT-GBRT"])
+				assert(self.opt_alg in ["1+1", "SKOPT-RF", "SKOPT-ET", "SKOPT-GBRT", "Optuna-TPE"])
 			if '-defobj=' in p:
 				self.def_point_time = math.ceil(float(p.split('-defobj=')[1]))
 			if '-maxpoints=' in p:
@@ -119,7 +124,7 @@ class Param:
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-dir [Options]')
   print('  Options :\n' +\
-  '  -optalg=["1+1", "SKOPT-GP", "SKOPT-RF", "SKOPT-ET", "SKOPT-GBRT"] - (default : "1+1") type of optimization algorithm' + '\n' +\
+  '  -optalg=["1+1", "SKOPT-RF", "SKOPT-ET", "SKOPT-GBRT", "Optuna-TPE"] - (default : "1+1") type of optimization algorithm' + '\n' +\
   '  -defobj=<float>        - (default : -1)    objective funtion value for the default point' + '\n' +\
   '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
   '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
@@ -275,7 +280,7 @@ def ask_points(skt_opt, points_num_to_gen : int):
           # New point and possible combination:
           generated_points[point_tuple] = PointStatus.GENERATED
           new_points.append(pnt)
-  elif op.opt_alg != "1+1": # "SKOPT-GP", "SKOPT-RF", "SKOPT-ET", "SKOPT-GBRT"
+  elif 'SKOPT' in op.opt_alg: # "SKOPT-RF", "SKOPT-ET", "SKOPT-GBRT", "Optuna-TPE"
     new_points_npint64 = skt_opt.ask(n_points=points_num_to_gen)
     #print(generated_points)
     #print(new_points_npint64)
@@ -291,6 +296,23 @@ def ask_points(skt_opt, points_num_to_gen : int):
       assert(point_tuple not in generated_points)
       generated_points[point_tuple] = PointStatus.GENERATED
     #
+  elif op.opt_alg == 'Optuna-TPE':
+    # Only 1 point a time for Optuna:
+    assert(points_num_to_gen == 1)
+    optuna_trial = optuna_study.ask()
+    new_point = []
+    assert(len(params) > 0)
+    for param in params:
+      val = optuna_trial.suggest_categorical(param.name, param.values)
+      assert(val in param.values)
+      new_point.append(val)
+    assert(len(new_point) == len(params))
+    new_points.append(new_point)
+    assert(new_point != best_point)
+    point_tuple = tuple(new_point)
+    assert(point_tuple not in generated_points)
+    generated_points[point_tuple] = PointStatus.GENERATED
+
   return new_points
 
 
@@ -497,7 +519,22 @@ def collect_result(res : tuple):
     generated_points[tuple_point] = PointStatus.INTERRUPTED
   # Tell SKOPT the objective function value:
   if 'SKOPT-' in op.opt_alg:
-    res = skt_opt.tell(point, tell_time)
+    skt_opt.tell(point, tell_time)
+  elif op.opt_alg == "Optuna-TPE":
+    # No proper trial exists since no ask() was called (e.g. for the default point):
+    if type(optuna_trial) == types.NoneType:
+      trial_params = {}
+      trial_distributions = {}
+      for param, chosen_value in zip(params, point):
+        trial_params[param.name] = chosen_value
+        trial_distributions[param.name] = CategoricalDistribution(param.values)
+      trial = optuna.trial.create_trial(params=trial_params, distributions=trial_distributions, value=tell_time)
+      optuna_study.add_trial(trial)
+    else: # a proper optuna trial exists, so tell()
+      if is_interrupted_point:
+        optuna_study.tell(optuna_trial, state=TrialState.PRUNED)
+      else:
+        optuna_study.tell(optuna_trial, tell_time)
   assert(best_sum_time > 0)
 
 
@@ -683,10 +720,13 @@ if __name__ == '__main__':
   elapsed_time = round(time.time() - start_time, 2)
   print('Elapsed : ' + str(elapsed_time) + ' seconds')
 
+  init_points_num = len(params) + 1
+  print('init_points_num for ask-and-tell algorithm : ' + str(init_points_num))
+
   # Initialize sktopt optimizer if needed:
   if op.opt_alg == "1+1":
      BOUND_MULTIPLIER = 1
-  elif op.opt_alg != "1+1":
+  elif 'SKOPT' in op.opt_alg:
      BOUND_MULTIPLIER = 2 # worse points are needed for surrogate models
      skt_opt_space=[]
      # space.append(Integer(0, 10, name='x2'))
@@ -695,10 +735,12 @@ if __name__ == '__main__':
      estimator_type = op.opt_alg
      print('sktopt estimator type : ' + estimator_type)
      # As recommended, the number of initial points is d+1, where d is the number of variables:
-     init_points_num = len(params) + 1
-     print('init_points_num : ' + str(init_points_num))
-     skt_opt = Optimizer(skt_opt_space, base_estimator=estimator_type.replace('SKOPT-', ''), n_initial_points=init_points_num, random_state=seed)
-
+     skt_opt = Optimizer(skt_opt_space, base_estimator=estimator_type.replace('SKOPT-', ''), 
+                         n_initial_points=init_points_num, random_state=seed)
+  elif op.opt_alg == "Optuna-TPE":
+    optuna_study = optuna.create_study(
+    direction="minimize",
+    sampler=optuna.samplers.TPESampler(n_startup_trials=init_points_num, seed=seed))
   print('BOUND_MULTIPLIER : ' + str(BOUND_MULTIPLIER))
 
   updates_num = 0
