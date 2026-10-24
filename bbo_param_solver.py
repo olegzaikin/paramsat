@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.14.0'
+version = '0.14.1'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -40,6 +40,7 @@ from skopt import Optimizer
 from skopt.space import Categorical
 import optuna
 from optuna.distributions import CategoricalDistribution
+import optunahub
 
 skt_opt = None
 optuna_study = None
@@ -50,7 +51,8 @@ optalg_indices = {
     "SKOPT-RF" : 1, 
     "SKOPT-ET" : 2, 
     "SKOPT-GBRT" : 3,
-    "Optuna-TPE" : 4
+    "Optuna-TPE" : 4,
+    "Optuna-HillClimbing" : 5
 }
 
 class PointStatus(Enum):
@@ -95,7 +97,7 @@ class Options:
 				tmp = p.split('-optalg=')[1]
 				tmp = tmp.replace("'", "")
 				self.opt_alg = tmp.replace('"', '')
-				assert(self.opt_alg in ["1+1", "SKOPT-RF", "SKOPT-ET", "SKOPT-GBRT", "Optuna-TPE"])
+				assert(self.opt_alg in ["1+1", "SKOPT-RF", "SKOPT-ET", "SKOPT-GBRT", "Optuna-TPE", "Optuna-HillClimbing"])
 			if '-defobj=' in p:
 				self.def_point_time = math.ceil(float(p.split('-defobj=')[1]))
 			if '-maxpoints=' in p:
@@ -124,7 +126,7 @@ class Param:
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-dir [Options]')
   print('  Options :\n' +\
-  '  -optalg=["1+1", "SKOPT-RF", "SKOPT-ET", "SKOPT-GBRT", "Optuna-TPE"] - (default : "1+1") type of optimization algorithm' + '\n' +\
+  '  -optalg=[1+1, SKOPT-RF, SKOPT-ET, SKOPT-GBRT, Optuna-TPE, Optina-HillClimbing] - (default : "1+1") type of optimization algorithm' + '\n' +\
   '  -defobj=<float>        - (default : -1)    objective funtion value for the default point' + '\n' +\
   '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
   '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
@@ -282,8 +284,6 @@ def ask_points(skt_opt, points_num_to_gen : int):
           new_points.append(pnt)
   elif 'SKOPT' in op.opt_alg: # "SKOPT-RF", "SKOPT-ET", "SKOPT-GBRT", "Optuna-TPE"
     new_points_npint64 = skt_opt.ask(n_points=points_num_to_gen)
-    #print(generated_points)
-    #print(new_points_npint64)
     assert(len(new_points_npint64) == points_num_to_gen)
     new_points = []
     # Convert from numpy in64 to int:
@@ -295,11 +295,13 @@ def ask_points(skt_opt, points_num_to_gen : int):
       # Each ask must be completed by tell, so no same points:
       assert(point_tuple not in generated_points)
       generated_points[point_tuple] = PointStatus.GENERATED
-    #
-  elif op.opt_alg == 'Optuna-TPE':
+  elif 'Optuna' in op.opt_alg:
     # Only 1 point a time for Optuna:
     assert(points_num_to_gen == 1)
+    # Check whether Optuna initializatoin was done:
+    assert(type(optuna_study) != types.NoneType)
     optuna_trial = optuna_study.ask()
+    # Take a new point from Optuna: 
     new_point = []
     assert(len(params) > 0)
     for param in params:
@@ -518,9 +520,10 @@ def collect_result(res : tuple):
     assert(penalty_sum_time > 0)
     generated_points[tuple_point] = PointStatus.INTERRUPTED
   # Tell SKOPT the objective function value:
-  if 'SKOPT-' in op.opt_alg:
+  if 'SKOPT' in op.opt_alg:
+    assert(tell_time > 0)
     skt_opt.tell(point, tell_time)
-  elif op.opt_alg == "Optuna-TPE":
+  elif 'Optuna' in op.opt_alg:
     # No proper trial exists since no ask() was called (e.g. for the default point):
     if type(optuna_trial) == types.NoneType:
       trial_params = {}
@@ -530,10 +533,12 @@ def collect_result(res : tuple):
         trial_distributions[param.name] = CategoricalDistribution(param.values)
       trial = optuna.trial.create_trial(params=trial_params, distributions=trial_distributions, value=tell_time)
       optuna_study.add_trial(trial)
-    else: # a proper optuna trial exists, so tell()
+    else:
+      # Give an actual function value only if not interrupted:
       if is_interrupted_point:
         optuna_study.tell(optuna_trial, state=TrialState.PRUNED)
       else:
+        assert(tell_time > 0)
         optuna_study.tell(optuna_trial, tell_time)
   assert(best_sum_time > 0)
 
@@ -737,12 +742,18 @@ if __name__ == '__main__':
      # As recommended, the number of initial points is d+1, where d is the number of variables:
      skt_opt = Optimizer(skt_opt_space, base_estimator=estimator_type.replace('SKOPT-', ''), 
                          n_initial_points=init_points_num, random_state=seed)
-  elif op.opt_alg == "Optuna-TPE":
-    optuna_study = optuna.create_study(
-    direction="minimize",
-    sampler=optuna.samplers.TPESampler(n_startup_trials=init_points_num, seed=seed))
-  print('BOUND_MULTIPLIER : ' + str(BOUND_MULTIPLIER))
+  elif op.opt_alg == 'Optuna-TPE':
+    sampler = optuna.samplers.TPESampler(n_startup_trials=init_points_num, seed=seed)
+    optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
+  elif op.opt_alg == 'Optuna-HillClimbing':
+    mod = optunahub.load_module("samplers/hill_climbing")
+    # Set the limit of restarts to the limit of points to stay in HillClimbing mode,
+    # otherwise HillClimbing can switch to Random search.
+    # neighbor_size can be also changed here: 
+    sampler = mod.HillClimbingSampler(seed=seed, max_restarts=op.max_points) 
+    optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
 
+  print('BOUND_MULTIPLIER : ' + str(BOUND_MULTIPLIER))
   updates_num = 0
   max_instance_time_best_point = -1
   skipped_points_num = 0
