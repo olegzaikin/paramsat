@@ -1,4 +1,4 @@
-timelim=43200
+timelim=3600
 pointslim=1000
 for alg in SKOPT-ET SKOPT-RF SKOPT-GBRT 1+1 Optuna-TPE Optuna-HillClimbing
 do

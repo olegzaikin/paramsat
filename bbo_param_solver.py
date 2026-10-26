@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.14.3'
+version = '0.14.4'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -257,6 +257,10 @@ def ask_point():
   global paramsdict
   global op
   global best_point
+  global skt_opt
+  global optuna_study
+  global optuna_trial
+
   assert(len(best_point) == len(params))
   new_point = None
   if op.opt_alg == "1+1":
@@ -463,6 +467,9 @@ def collect_result(res : tuple):
   global op 
   global cnfs_num
   global worse_than_best_but_calc_points_num
+  global optuna_trial
+  global skt_opt
+  global optuna_study
 
   point = res[0]
   cur_sum_time = res[1]
@@ -525,9 +532,9 @@ def collect_result(res : tuple):
     tell_time = penalty_sum_time
     assert(penalty_sum_time > 0)
     generated_points[tuple_point] = PointStatus.INTERRUPTED
+  assert(tell_time > 0)
   # Tell SKOPT the objective function value:
   if 'SKOPT' in op.opt_alg:
-    assert(tell_time > 0)
     skt_opt.tell(point, tell_time)
   elif 'Optuna' in op.opt_alg:
     # No proper trial exists since no ask() was called (e.g. for the default point):
@@ -537,14 +544,14 @@ def collect_result(res : tuple):
       for param, chosen_value in zip(params, point):
         trial_params[param.name] = chosen_value
         trial_distributions[param.name] = CategoricalDistribution(param.values)
-      trial = optuna.trial.create_trial(params=trial_params, distributions=trial_distributions, value=tell_time)
-      optuna_study.add_trial(trial)
+      completed_trial = optuna.trial.create_trial(params=trial_params, distributions=trial_distributions, value=tell_time)
+      optuna_study.add_trial(completed_trial)
     else:
       # Give an actual function value only if not interrupted:
       if is_interrupted_point:
         optuna_study.tell(optuna_trial, state=TrialState.PRUNED)
       else:
-        assert(tell_time > 0)
+        print(optuna_trial)
         optuna_study.tell(optuna_trial, tell_time)
   assert(best_sum_time > 0)
 
@@ -862,3 +869,29 @@ if __name__ == '__main__':
       print('Difference from the default point:')
       print(diff_str)
   print('Final best command : \n' + best_command)
+
+  # Print Optuna statistics:
+  if optuna_study != None:
+    running_trials_num = 0
+    waiting_trials_num = 0
+    pruned_trials_num = 0
+    complete_trials_num = 0
+    fail_trials_num = 0
+    for t in optuna_study.trials:
+      if t.state == optuna.trial.TrialState.RUNNING:
+         running_trials_num += 1
+      if t.state == optuna.trial.TrialState.WAITING:
+         waiting_trials_num += 1
+      if t.state == optuna.trial.TrialState.PRUNED:
+         pruned_trials_num += 1
+      if t.state == optuna.trial.TrialState.COMPLETE:
+         complete_trials_num += 1
+      if t.state == optuna.trial.TrialState.FAIL:
+         fail_trials_num += 1
+    print('')
+    print('Optuna statistics :')
+    print(str(running_trials_num) + ' running trials')
+    print(str(waiting_trials_num) + ' waiting trials')
+    print(str(pruned_trials_num) + ' pruned trials')
+    print(str(complete_trials_num) + ' complete trials')
+    print(str(fail_trials_num) + ' fail trials')
