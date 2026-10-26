@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.14.4'
+version = '0.14.5'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -551,7 +551,6 @@ def collect_result(res : tuple):
       if is_interrupted_point:
         optuna_study.tell(optuna_trial, state=TrialState.PRUNED)
       else:
-        print(optuna_trial)
         optuna_study.tell(optuna_trial, tell_time)
   assert(best_sum_time > 0)
 
