@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.14.1'
+version = '0.14.2'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -247,7 +247,7 @@ def equalparamval(paramname : str, point1 : list, point2 : list, inddict : dict)
 
 
 # Generate new points via (1+1)-EA or ask-tell interface:
-def ask_points(skt_opt, points_num_to_gen : int):
+def ask_point():
   global random
   global def_point
   global skipped_points_num
@@ -257,65 +257,71 @@ def ask_points(skt_opt, points_num_to_gen : int):
   global op
   global best_point
   assert(len(best_point) == len(params))
-  assert(points_num_to_gen >= 0)
-  if points_num_to_gen == 0:
-    return []
-  new_points = []
+  new_point = None
   if op.opt_alg == "1+1":
      # Change each value with probability:
-    while len(new_points) < points_num_to_gen:
-        pnt = copy.deepcopy(best_point)
-        # With probability 36 % the point is the same, so do until it is a new one:
-        while pnt == best_point:
-          for i in range(len(params)):
-            prob = random.random()
-            if (prob <= 1/len(params)):
-              pnt[i] = next_value(params[i].values, pnt[i])
-        assert(pnt != best_point)
-        point_tuple = tuple(pnt)
-        # If point has been already generated:
-        if point_tuple in generated_points:
-          # The calculation is finished or the point is just generated:
-          skipped_points_num += 1
-          #print(str(skipped_points_num) + ' repeated points skipped')
-        else:
-          # New point and possible combination:
-          generated_points[point_tuple] = PointStatus.GENERATED
-          new_points.append(pnt)
-  elif 'SKOPT' in op.opt_alg: # "SKOPT-RF", "SKOPT-ET", "SKOPT-GBRT", "Optuna-TPE"
-    new_points_npint64 = skt_opt.ask(n_points=points_num_to_gen)
-    assert(len(new_points_npint64) == points_num_to_gen)
-    new_points = []
+    while True:
+      pnt = copy.deepcopy(best_point)
+      # With probability 36 % the point is the same, so do until it is a new one:
+      while pnt == best_point:
+        for i in range(len(params)):
+          prob = random.random()
+          if (prob <= 1/len(params)):
+            pnt[i] = next_value(params[i].values, pnt[i])
+      assert(pnt != best_point)
+      point_tuple = tuple(pnt)
+      # If point has been already generated:
+      if point_tuple in generated_points:
+        # The same point again, skip it:
+        skipped_points_num += 1
+        #print(str(skipped_points_num) + ' repeated points skipped')
+      else:
+        # New point and possible combination:
+        new_point = pnt
+        break
+  elif 'SKOPT' in op.opt_alg: # "SKOPT-RF", "SKOPT-ET", "SKOPT-GBRT":
+     # In SKOPT no point can be generated more than once, son no loop is needed:
+    new_points_npint64 = skt_opt.ask(n_points=1)
+    assert(len(new_points_npint64) == 1)
+    assert(len(new_points_npint64[0]) == len(params))
     # Convert from numpy in64 to int:
-    for p in new_points_npint64:
-      new_points.append([int(x) for x in p])
-    for p in new_points:
-      assert(p != best_point)
-      point_tuple = tuple(p)
-      # Each ask must be completed by tell, so no same points:
-      assert(point_tuple not in generated_points)
-      generated_points[point_tuple] = PointStatus.GENERATED
-  elif 'Optuna' in op.opt_alg:
-    # Only 1 point a time for Optuna:
-    assert(points_num_to_gen == 1)
+    pnt=[int(x) for x in new_points_npint64[0]]
+    assert(pnt != best_point)
+    point_tuple = tuple(pnt)
+    assert(point_tuple not in generated_points)
+    new_point = pnt
+  elif 'Optuna' in op.opt_alg: # Optuna-TPE, Optuna-HillCLimbing
     # Check whether Optuna initializatoin was done:
     assert(type(optuna_study) != types.NoneType)
-    optuna_trial = optuna_study.ask()
-    # Take a new point from Optuna: 
-    new_point = []
-    assert(len(params) > 0)
-    for param in params:
-      val = optuna_trial.suggest_categorical(param.name, param.values)
-      assert(val in param.values)
-      new_point.append(val)
-    assert(len(new_point) == len(params))
-    new_points.append(new_point)
-    assert(new_point != best_point)
-    point_tuple = tuple(new_point)
-    assert(point_tuple not in generated_points)
-    generated_points[point_tuple] = PointStatus.GENERATED
+    # Take a new point from Optuna;
+    while True:
+      optuna_trial = optuna_study.ask()
+      pnt = []
+      assert(len(params) > 0)
+      for param in params:
+        val = optuna_trial.suggest_categorical(param.name, param.values)
+        assert(val in param.values)
+        pnt.append(val)
+      # Some algorithms (e.g. HillCLimbing) can return the same point again.
+      # In this case tell the Optuna that this point is pruned 
+      # (this will not erease the existing result for this point):
+      point_tuple = tuple(pnt)
+      if point_tuple in generated_points:
+        # The same point again, skip it:
+        optuna_study.tell(optuna_trial, state=TrialState.PRUNED)
+        skipped_points_num += 1
+      else:
+        new_point = pnt
+        break
+    
+  assert(type(new_point) != types.NoneType)
+  assert(len(new_point) == len(params))
+  assert(new_point != best_point)
+  point_tuple = tuple(new_point)
+  assert(point_tuple not in generated_points)
+  generated_points[point_tuple] = PointStatus.GENERATED
 
-  return new_points
+  return new_point
 
 
 # Difference between two given points (empty string if equal points):
@@ -454,7 +460,6 @@ def collect_result(res : tuple):
   global is_updated
   global generated_points
   global op 
-  global skt_opt
   global cnfs_num
   global worse_than_best_but_calc_points_num
 
@@ -730,22 +735,24 @@ if __name__ == '__main__':
 
   # Initialize sktopt optimizer if needed:
   if op.opt_alg == "1+1":
-     BOUND_MULTIPLIER = 1
+    BOUND_MULTIPLIER = 1
   elif 'SKOPT' in op.opt_alg:
-     BOUND_MULTIPLIER = 2 # worse points are needed for surrogate models
-     skt_opt_space=[]
-     # space.append(Integer(0, 10, name='x2'))
-     for param in params:
-        skt_opt_space.append(Categorical(param.values, name=param.name))
-     estimator_type = op.opt_alg
-     print('sktopt estimator type : ' + estimator_type)
-     # As recommended, the number of initial points is d+1, where d is the number of variables:
-     skt_opt = Optimizer(skt_opt_space, base_estimator=estimator_type.replace('SKOPT-', ''), 
-                         n_initial_points=init_points_num, random_state=seed)
+    BOUND_MULTIPLIER = 2 # worse points are needed for surrogate models
+    skt_opt_space=[]
+    # space.append(Integer(0, 10, name='x2'))
+    for param in params:
+      skt_opt_space.append(Categorical(param.values, name=param.name))
+    estimator_type = op.opt_alg
+    print('sktopt estimator type : ' + estimator_type)
+    # As recommended, the number of initial points is d+1, where d is the number of variables:
+    skt_opt = Optimizer(skt_opt_space, base_estimator=estimator_type.replace('SKOPT-', ''), 
+                        n_initial_points=init_points_num, random_state=seed)
   elif op.opt_alg == 'Optuna-TPE':
+    BOUND_MULTIPLIER = 2 # worse points are needed for surrogate models
     sampler = optuna.samplers.TPESampler(n_startup_trials=init_points_num, seed=seed)
     optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
   elif op.opt_alg == 'Optuna-HillClimbing':
+    BOUND_MULTIPLIER = 1
     mod = optunahub.load_module("samplers/hill_climbing")
     # Set the limit of restarts to the limit of points to stay in HillClimbing mode,
     # otherwise HillClimbing can switch to Random search.
@@ -800,12 +807,11 @@ if __name__ == '__main__':
     elapsed_time = round(time.time() - start_time, 2)
     print('elapsed : ' + str(elapsed_time) + ' seconds')
     # Ask for a new point:
-    points_to_process = ask_points(skt_opt, 1)
-    assert(len(points_to_process) == 1)
+    point_to_process = ask_point()
     is_updated = False
     # Check the point's status:
-    tuple_point = tuple(points_to_process[0])
-    calc_obj_collect_result(points_to_process[0])
+    tuple_point = tuple(point_to_process)
+    calc_obj_collect_result(point_to_process)
     iter += 1
     elapsed_time = round(time.time() - start_time, 2)
     processed_points_num = processed(generated_points)
