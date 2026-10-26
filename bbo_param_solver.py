@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.14.2'
+version = '0.14.3'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -40,6 +40,7 @@ from skopt import Optimizer
 from skopt.space import Categorical
 import optuna
 from optuna.distributions import CategoricalDistribution
+from optuna.trial import TrialState
 import optunahub
 
 skt_opt = None
