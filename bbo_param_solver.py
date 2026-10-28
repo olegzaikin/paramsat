@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.14.6'
+version = '0.14.7'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -48,7 +48,8 @@ optuna_trial = None
 optalg_indices = {
     "1+1" : 0,
     "Optuna-TPE" : 1,
-    "Optuna-HillClimbing" : 2
+    "Optuna-HillClimbing" : 2,
+    "Optuna-GP" : 3
 }
 
 class PointStatus(Enum):
@@ -93,7 +94,7 @@ class Options:
 				tmp = p.split('-optalg=')[1]
 				tmp = tmp.replace("'", "")
 				self.opt_alg = tmp.replace('"', '')
-				assert(self.opt_alg in ["1+1", "Optuna-TPE", "Optuna-HillClimbing"])
+				assert(self.opt_alg in ["1+1", "Optuna-TPE", "Optuna-HillClimbing", "Optuna-GP"])
 			if '-defobj=' in p:
 				self.def_point_time = math.ceil(float(p.split('-defobj=')[1]))
 			if '-maxpoints=' in p:
@@ -122,7 +123,7 @@ class Param:
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-dir [Options]')
   print('  Options :\n' +\
-  '  -optalg=[1+1, Optuna-TPE, Optina-HillClimbing] - (default : "1+1") type of optimization algorithm' + '\n' +\
+  '  -optalg=[1+1, Optuna-TPE, Optina-HillClimbing, "Optuna-GP"] - (default : "1+1") type of optimization algorithm' + '\n' +\
   '  -defobj=<float>        - (default : -1)    objective funtion value for the default point' + '\n' +\
   '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
   '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
@@ -279,7 +280,7 @@ def ask_point():
         # New point and possible combination:
         new_point = pnt
         break
-  elif 'Optuna' in op.opt_alg: # Optuna-TPE, Optuna-HillCLimbing
+  elif 'Optuna' in op.opt_alg: # Optuna-TPE, Optuna-HillCLimbing, Optuna-GP
     # Check whether Optuna initializatoin was done:
     assert(type(optuna_study) != types.NoneType)
     # Take a new point from Optuna.
@@ -722,6 +723,10 @@ if __name__ == '__main__':
   elif op.opt_alg == 'Optuna-TPE':
     BOUND_MULTIPLIER = 2 # worse points are needed for surrogate models
     sampler = optuna.samplers.TPESampler(n_startup_trials=init_points_num, seed=seed)
+    optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
+  elif op.opt_alg == "Optuna-GP":
+    BOUND_MULTIPLIER = 2 # worse points are needed for Gaussign process:
+    sampler = optuna.samplers.GPSampler(deterministic_objective=True, n_startup_trials=init_points_num, seed=seed)
     optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
   elif op.opt_alg == 'Optuna-HillClimbing':
     BOUND_MULTIPLIER = 1
