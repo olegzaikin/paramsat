@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.14.7'
+version = '0.15.0'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -36,20 +36,23 @@ from enum import Enum
 from datetime import datetime
 import numpy as np
 import types
+import hashlib
 import optuna
 from optuna.distributions import CategoricalDistribution
 from optuna.trial import TrialState
 import optunahub
+import nevergrad
 
-skt_opt = None
 optuna_study = None
 optuna_trial = None
+SWITCH_OPTIMIZER = False
 
 optalg_indices = {
     "1+1" : 0,
     "Optuna-TPE" : 1,
     "Optuna-HillClimbing" : 2,
-    "Optuna-GP" : 3
+    "Optuna-GP" : 3,
+    "Optuna-HillClimbing-TPE" : 4
 }
 
 class PointStatus(Enum):
@@ -94,7 +97,7 @@ class Options:
 				tmp = p.split('-optalg=')[1]
 				tmp = tmp.replace("'", "")
 				self.opt_alg = tmp.replace('"', '')
-				assert(self.opt_alg in ["1+1", "Optuna-TPE", "Optuna-HillClimbing", "Optuna-GP"])
+				assert(self.opt_alg in ["1+1", "Optuna-TPE", "Optuna-HillClimbing", "Optuna-GP", "Optuna-HillClimbing-TPE"])
 			if '-defobj=' in p:
 				self.def_point_time = math.ceil(float(p.split('-defobj=')[1]))
 			if '-maxpoints=' in p:
@@ -123,7 +126,7 @@ class Param:
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-dir [Options]')
   print('  Options :\n' +\
-  '  -optalg=[1+1, Optuna-TPE, Optina-HillClimbing, "Optuna-GP"] - (default : "1+1") type of optimization algorithm' + '\n' +\
+  '  -optalg=[1+1, Optuna-TPE, Optina-HillClimbing, "Optuna-GP", "Optuna-HillClimbing-TPE"] - (default : "1+1") type of optimization algorithm' + '\n' +\
   '  -defobj=<float>        - (default : -1)    objective funtion value for the default point' + '\n' +\
   '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
   '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
@@ -245,15 +248,9 @@ def equalparamval(paramname : str, point1 : list, point2 : list, inddict : dict)
 
 # Generate new points via (1+1)-EA or ask-tell interface:
 def ask_point():
-  global random
-  global def_point
+  # Here are only global variables which are changed in this function: 
   global skipped_points_num
   global generated_points
-  global params
-  global paramsdict
-  global op
-  global best_point
-  global skt_opt
   global optuna_study
   global optuna_trial
 
@@ -280,7 +277,7 @@ def ask_point():
         # New point and possible combination:
         new_point = pnt
         break
-  elif 'Optuna' in op.opt_alg: # Optuna-TPE, Optuna-HillCLimbing, Optuna-GP
+  elif 'Optuna' in op.opt_alg: # Optuna-TPE, Optuna-HillCLimbing, Optuna-GP, Optuna-HillClimbing-TPE
     # Check whether Optuna initializatoin was done:
     assert(type(optuna_study) != types.NoneType)
     # Take a new point from Optuna.
@@ -298,7 +295,8 @@ def ask_point():
         pnt.append(val)
       point_tuple = tuple(pnt)
       if point_tuple in generated_points:
-        # The same point again, skip it:
+        # The same point again, skip it.
+        # Here tell() is neede since each ask() must be paired with tell():
         optuna_study.tell(optuna_trial, state=TrialState.PRUNED)
         skipped_points_num += 1
       else:
@@ -337,10 +335,8 @@ def calc_obj_collect_result(point : list):
 
 # Run solver on a given point:
 def calc_obj(point : list):
-  global op
-  global params
-  global start_time
   global generated_points
+
   assert(len(params) > 1)
   assert(len(params) == len(point))
   assert(len(cnfs) > 0)
@@ -440,22 +436,14 @@ def calc_obj(point : list):
 
 # Collect a result produced by solver:
 def collect_result(res : tuple):
-  global def_point
   global default_sum_time
   global max_instance_time_best_point
   global best_sum_time
   global best_point
   global best_command
   global updates_num
-  global params
-  global start_time
-  global is_updated
   global generated_points
-  global op 
-  global cnfs_num
   global worse_than_best_but_calc_points_num
-  global optuna_trial
-  global skt_opt
   global optuna_study
 
   point = res[0]
@@ -471,16 +459,9 @@ def collect_result(res : tuple):
   #print('max_wall_time : ' + str(max_wall_time) + ' seconds')
   tuple_point = tuple(point)
   assert(generated_points[tuple_point] == PointStatus.STARTED)
-  finished_points_num = finished(generated_points)
-  interrupted_points_num = interrupted(generated_points)
-  elapsed_sec = time.time() - start_time
-  s = str(finished_points_num) + ' finished points, ' + str(interrupted_points_num) + ' interrupted points, ' + \
-    'elapsed ' + str(elapsed_sec)
-  print(s)
 
   # If a new record point is found:
   if (is_interrupted_point == False and cur_sum_time > 0) and (cur_sum_time < best_sum_time or best_sum_time <= 0):
-    is_updated = True
     updates_num += 1
     best_sum_time = cur_sum_time
     best_point = copy.deepcopy(point)
@@ -634,6 +615,64 @@ def stat(generated_points : dict):
     str(interrupted_num) + ' interrupted\n'
   return res
 
+def switch_to_tpe(seed : int):
+  global optuna_study
+  global BOUND_MULTIPLIER
+  global SWITCH_OPTIMIZER
+
+  assert(SWITCH_OPTIMIZER == False)
+  SWITCH_OPTIMIZER = True
+  reconstructed_trials = []
+  # This function must be called at most once:
+  for t in optuna_study.trials:
+    # Skip failed/running trials — TPE ignores such trials anyway:
+    if t.state not in [optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.PRUNED]:
+      continue
+    kwargs = {
+      "params": t.params,
+      "distributions": t.distributions,
+      "state": t.state,
+    }
+    if t.state == optuna.trial.TrialState.COMPLETE:
+      # Completed trials require value or values
+      if t.value is not None:
+        kwargs["value"] = t.value
+      elif t.values is not None:
+        kwargs["values"] = t.values
+      else:
+        # Completed trial with no value — skip it:
+        continue
+    else:  # PRUNED
+      assert(t.state == optuna.trial.TrialState.PRUNED)
+      # Pass the intermediate values that led to pruning
+      kwargs["intermediate_values"] = t.intermediate_values
+      # Some pruned trials may still carry a value (e.g., from
+      # a pruner that records the last value); include if present
+      if t.value is not None:
+        kwargs["value"] = t.value
+    reconstructed_trials.append(optuna.trial.create_trial(**kwargs))
+  # end of for loop
+  reconstructed_trials_num = len(reconstructed_trials)
+  print(str(reconstructed_trials_num) + ' trials are ready to be added to TPE from HillClimbing.')
+  processed_points_num = processed(generated_points)
+  assert(processed_points_num <= reconstructed_trials_num)
+  if processed_points_num < reconstructed_trials_num:
+    print(str(reconstructed_trials_num - processed_points_num) + ' of these trials are repeated (skipped) points')
+  BOUND_MULTIPLIER = 2 # worse points are needed for surrogate models
+  # 0 startup trials since they are random - we will use HillClimbing's points instead:
+  sampler = optuna.samplers.TPESampler(n_startup_trials=0, seed=op.seed)
+  optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
+  optuna_study.add_trials(reconstructed_trials)
+  print('Switched from HillClimbing to TPE, and added trials, seed=' + str(seed))
+  print('BOUND_MULTIPLIER : ' + str(BOUND_MULTIPLIER))
+  print('List of added trials :')
+  # View summary of all trials:
+  df = optuna_study.trials_dataframe(attrs=('number', 'value', 'params', 'state'))
+  print(df)
+  complete_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.COMPLETE,)))
+  pruned_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.PRUNED,)))
+  print(f"COMPLETED: {complete_count}, PRUNED: {pruned_count}")
+
 
 # Main function:
 if __name__ == '__main__':
@@ -658,13 +697,31 @@ if __name__ == '__main__':
   op.read(sys.argv[3:])
   print(op)
 
-  # Force the seed depend on wall time and number of CPU cores.
-  # + 1 is needed to avoid multiplying by 0 if the base seed is 0.
-  seed = (op.seed + 1) * op.max_wall_time + optalg_indices[op.opt_alg]
-  random.seed(seed)
-  print('Seed ' + str(seed) + ' is formed on the base of initial seed ' + str(op.seed) )
-  random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k = 10))    
-  print("The randomly generated string is : " + str(random_str))
+  # Read CNFs:
+  cnfs = []
+  cnfs = read_cnfs(cnfs_dir_name)
+  cnfs_num = len(cnfs)
+  assert(len(cnfs) > 0)
+  print(str(len(cnfs)) + ' CNFs were read :')
+  for cnf in cnfs:
+    print(cnf)
+
+  # Force the seed depend solver, pcs name, CNFs names, and user's seed, 
+  # Algorithm index is not used here to have same seeds for all algorithms for comparison.
+  seed_string = solver_name + param_file_name + "".join(cnfs)
+  print('seed_string : ' + seed_string)
+  hash = hashlib.sha256(seed_string.encode("utf-8"))
+  hex_hash = hash.hexdigest()
+  int_hash = int(hex_hash, 16)
+  print('int hash of seed string : ' + str(int_hash))
+  # % (2**32) is needed since a seed myst be between 0 and 2**32 - 1
+  op.seed = (op.seed + int_hash) % (2**32)
+  print('Updated seed : ' + str(op.seed))
+
+  random.seed(op.seed)
+  random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k = 10))
+  random_str += '_' + op.opt_alg
+  print("The randomly generated string for algorithm " + op.opt_alg + " is : " + str(random_str))
   assert(len(solver_name) > 0)
   new_solver_name = create_solver_copy(solver_name, random_str)
   print('Solver name is changed to ' + new_solver_name)
@@ -694,15 +751,6 @@ if __name__ == '__main__':
   print('Dictionary of parameters :')
   print(paramsdict)  
 
-  # Read CNFs:
-  cnfs = []
-  cnfs = read_cnfs(cnfs_dir_name)
-  cnfs_num = len(cnfs)
-  assert(len(cnfs) > 0)
-  print(str(len(cnfs)) + ' CNFs were read :')
-  for cnf in cnfs:
-    print(cnf)
-
   best_point = copy.deepcopy(def_point)
   # Command for default point:
   best_command = op.solver_name + ' ' + cnfs[0]
@@ -722,14 +770,20 @@ if __name__ == '__main__':
     BOUND_MULTIPLIER = 1
   elif op.opt_alg == 'Optuna-TPE':
     BOUND_MULTIPLIER = 2 # worse points are needed for surrogate models
-    sampler = optuna.samplers.TPESampler(n_startup_trials=init_points_num, seed=seed)
+    sampler = optuna.samplers.TPESampler(n_startup_trials=init_points_num, seed=op.seed)
     optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
-  elif op.opt_alg == "Optuna-GP":
+  elif op.opt_alg == 'Optuna-GP':
     BOUND_MULTIPLIER = 2 # worse points are needed for Gaussign process:
-    sampler = optuna.samplers.GPSampler(deterministic_objective=True, n_startup_trials=init_points_num, seed=seed)
+    sampler = optuna.samplers.GPSampler(deterministic_objective=True, n_startup_trials=init_points_num, seed=op.seed)
     optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
-  elif op.opt_alg == 'Optuna-HillClimbing':
-    BOUND_MULTIPLIER = 1
+  elif op.opt_alg == 'Optuna-HillClimbing' or op.opt_alg == 'Optuna-HillClimbing-TPE':
+    # If HillClimbing works alone, bound multiplier > 1 is not needed:
+    if op.opt_alg == 'Optuna-HillClimbing':
+      BOUND_MULTIPLIER = 1
+    # Otherwise, bound multiplier = 2 since both good and bad completed points
+    # are needed for a surrogate model in TPE: 
+    elif op.opt_alg == 'Optuna-HillClimbing-TPE':
+      BOUND_MULTIPLIER = 2
     mod = optunahub.load_module("samplers/hill_climbing")
     # Set the limit of restarts to the limit of points to stay in HillClimbing mode,
     # otherwise HillClimbing can switch to Random search.
@@ -737,7 +791,8 @@ if __name__ == '__main__':
     search_space = {}
     for param in params:
       search_space[param.name] = CategoricalDistribution(param.values)
-    sampler = mod.HillClimbingSampler(search_space=search_space, max_restarts=op.max_points, seed=seed) 
+    print('op.seed : ' + str(op.seed))
+    sampler = mod.HillClimbingSampler(search_space=search_space, max_restarts=op.max_points, seed=op.seed) 
     optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
 
   print('BOUND_MULTIPLIER : ' + str(BOUND_MULTIPLIER))
@@ -796,16 +851,22 @@ if __name__ == '__main__':
   while processed_points_num < op.max_points and elapsed_time < op.max_wall_time:
     print('*** iter : ' + str(iter))
     elapsed_time = round(time.time() - start_time, 2)
-    print('elapsed : ' + str(elapsed_time) + ' seconds')
+    print('Elapsed ' + str(elapsed_time) + ' sec')
     # Ask for a new point:
     point_to_process = ask_point()
-    is_updated = False
     # Check the point's status:
     tuple_point = tuple(point_to_process)
+    #print(tuple_point)
     calc_obj_collect_result(point_to_process)
     iter += 1
     elapsed_time = round(time.time() - start_time, 2)
     processed_points_num = processed(generated_points)
+    assert(processed_points_num == iter)
+    finished_points_num = finished(generated_points)
+    interrupted_points_num = interrupted(generated_points)
+    assert(processed_points_num == finished_points_num + interrupted_points_num)
+    s = str(finished_points_num) + ' finished points, ' + str(interrupted_points_num) + ' interrupted points'
+    print(s)
     if processed_points_num % 100 == 0 and processed_points_num != prev_processed_points_num:
       assert(processed_points_num > prev_processed_points_num)
       print(str(processed_points_num) + ' points are processed;  elapsed : ' + str(elapsed_time) + ' seconds')
@@ -817,6 +878,9 @@ if __name__ == '__main__':
     if elapsed_time >= op.max_wall_time:
       print('The time limit is reached, break.')
       break
+    # Change Optuna's optimizer from HillClimbing to TPE:
+    if iter == init_points_num and op.opt_alg == 'Optuna-HillClimbing-TPE':
+      switch_to_tpe(op.seed)
 
   # Write generated points:
   write_points(generated_points, cnfs)
