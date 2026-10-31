@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.15.0'
+version = '0.15.1'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -336,7 +336,6 @@ def calc_obj_collect_result(point : list):
 # Run solver on a given point:
 def calc_obj(point : list):
   global generated_points
-
   assert(len(params) > 1)
   assert(len(params) == len(point))
   assert(len(cnfs) > 0)
@@ -430,6 +429,11 @@ def calc_obj(point : list):
         is_interrupted_point = True
         break
   # end of loop 'for cnf_file_name in cnfs'
+  # It is possible that is_interrupted_point is False here and sat_num < len(cnfs)
+  # if on the last CNF the solver is interrupted. If the solver was interrupted on
+  # any but the last CNF, then is_interrupted_point is already True here:
+  if sat_num < len(cnfs):
+    is_interrupted_point = True
   #print('Obj func value : ' + str(cur_sum_time))
   return point, cur_sum_time, max_instance_time, sys_str, is_interrupted_point
 
@@ -615,11 +619,18 @@ def stat(generated_points : dict):
     str(interrupted_num) + ' interrupted\n'
   return res
 
+def print_optuna_trials():
+  # View summary of all trials:
+  df = optuna_study.trials_dataframe(attrs=('number', 'value', 'params', 'state'))
+  print(df)
+  complete_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.COMPLETE,)))
+  pruned_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.PRUNED,)))
+  print(f"COMPLETED: {complete_count}, PRUNED: {pruned_count}")
+
 def switch_to_tpe(seed : int):
   global optuna_study
   global BOUND_MULTIPLIER
   global SWITCH_OPTIMIZER
-
   assert(SWITCH_OPTIMIZER == False)
   SWITCH_OPTIMIZER = True
   reconstructed_trials = []
@@ -666,12 +677,7 @@ def switch_to_tpe(seed : int):
   print('Switched from HillClimbing to TPE, and added trials, seed=' + str(seed))
   print('BOUND_MULTIPLIER : ' + str(BOUND_MULTIPLIER))
   print('List of added trials :')
-  # View summary of all trials:
-  df = optuna_study.trials_dataframe(attrs=('number', 'value', 'params', 'state'))
-  print(df)
-  complete_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.COMPLETE,)))
-  pruned_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.PRUNED,)))
-  print(f"COMPLETED: {complete_count}, PRUNED: {pruned_count}")
+  print_optuna_trials()
 
 
 # Main function:
@@ -942,3 +948,4 @@ if __name__ == '__main__':
     print(str(pruned_trials_num) + ' pruned trials')
     print(str(complete_trials_num) + ' complete trials')
     print(str(fail_trials_num) + ' fail trials')
+    print_optuna_trials()
