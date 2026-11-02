@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.15.1'
+version = '0.15.2'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -51,8 +51,7 @@ optalg_indices = {
     "1+1" : 0,
     "Optuna-TPE" : 1,
     "Optuna-HillClimbing" : 2,
-    "Optuna-GP" : 3,
-    "Optuna-HillClimbing-TPE" : 4
+    "Optuna-HillClimbing-TPE" : 3
 }
 
 class PointStatus(Enum):
@@ -97,7 +96,7 @@ class Options:
 				tmp = p.split('-optalg=')[1]
 				tmp = tmp.replace("'", "")
 				self.opt_alg = tmp.replace('"', '')
-				assert(self.opt_alg in ["1+1", "Optuna-TPE", "Optuna-HillClimbing", "Optuna-GP", "Optuna-HillClimbing-TPE"])
+				assert(self.opt_alg in ["1+1", "Optuna-TPE", "Optuna-HillClimbing", "Optuna-HillClimbing-TPE"])
 			if '-defobj=' in p:
 				self.def_point_time = math.ceil(float(p.split('-defobj=')[1]))
 			if '-maxpoints=' in p:
@@ -126,7 +125,7 @@ class Param:
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-dir [Options]')
   print('  Options :\n' +\
-  '  -optalg=[1+1, Optuna-TPE, Optina-HillClimbing, "Optuna-GP", "Optuna-HillClimbing-TPE"] - (default : "1+1") type of optimization algorithm' + '\n' +\
+  '  -optalg=[1+1, Optuna-TPE, Optina-HillClimbing, "Optuna-HillClimbing-TPE"] - (default : "1+1") type of optimization algorithm' + '\n' +\
   '  -defobj=<float>        - (default : -1)    objective funtion value for the default point' + '\n' +\
   '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
   '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
@@ -277,7 +276,7 @@ def ask_point():
         # New point and possible combination:
         new_point = pnt
         break
-  elif 'Optuna' in op.opt_alg: # Optuna-TPE, Optuna-HillCLimbing, Optuna-GP, Optuna-HillClimbing-TPE
+  elif 'Optuna' in op.opt_alg: # Optuna-TPE, Optuna-HillCLimbing, Optuna-HillClimbing-TPE
     # Check whether Optuna initializatoin was done:
     assert(type(optuna_study) != types.NoneType)
     # Take a new point from Optuna.
@@ -393,6 +392,12 @@ def calc_obj(point : list):
     assert(t >= 0)
     # Expect SAT or INTERR, while UNSAT is not a valid answer: 
     assert(sat == -1 or sat == 1)
+    # Normal situation is that the solver is not interrupted on the default point:
+    if sat == -1 and best_sum_time <= 0:
+      print('WARNING. A solver is interrupted on the default point, t : ' + str(t))
+      assert(default_sum_time <= 0)
+      is_interrupted_point = True
+      break
     # If the solver is interrupted at least once,
     if sat == -1 or (solver_time_lim > 0 and t >= solver_time_lim):
       # PAR10 penalty for an interrupted CNF:
@@ -449,13 +454,11 @@ def collect_result(res : tuple):
   global generated_points
   global worse_than_best_but_calc_points_num
   global optuna_study
-
   point = res[0]
   cur_sum_time = res[1]
   max_instance_time = res[2]
   command = res[3]
   is_interrupted_point = res[4]
-
   assert(cnfs_num > 0)
   # If interrupted, then not all instances are satisfiable:
   assert(cur_sum_time >= 0)
@@ -463,7 +466,6 @@ def collect_result(res : tuple):
   #print('max_wall_time : ' + str(max_wall_time) + ' seconds')
   tuple_point = tuple(point)
   assert(generated_points[tuple_point] == PointStatus.STARTED)
-
   # If a new record point is found:
   if (is_interrupted_point == False and cur_sum_time > 0) and (cur_sum_time < best_sum_time or best_sum_time <= 0):
     updates_num += 1
@@ -485,7 +487,6 @@ def collect_result(res : tuple):
       assert(diff_str != '')
       print('Difference from the default point :')
       print(diff_str + '\n')
-  
   # Two cases:
   # 1) The point is calculated, and the point is marked STARTED, so STARTED -> FINISHED
   # 2) A point is interrupted, so STARTED -> INTERRUPTED
@@ -505,7 +506,6 @@ def collect_result(res : tuple):
     assert(penalty_sum_time > 0)
     generated_points[tuple_point] = PointStatus.INTERRUPTED
   assert(tell_time > 0)
-
   # Tell Optuna the objective function value:
   if 'Optuna' in op.opt_alg:
     assert(type(optuna_trial) != types.NoneType)
@@ -622,7 +622,7 @@ def stat(generated_points : dict):
 def print_optuna_trials():
   # View summary of all trials:
   df = optuna_study.trials_dataframe(attrs=('number', 'value', 'params', 'state'))
-  print(df)
+  print(df.to_string())
   complete_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.COMPLETE,)))
   pruned_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.PRUNED,)))
   print(f"COMPLETED: {complete_count}, PRUNED: {pruned_count}")
@@ -755,7 +755,7 @@ if __name__ == '__main__':
   for i in range(len(params)):
     paramsdict[params[i].name] = i
   print('Dictionary of parameters :')
-  print(paramsdict)  
+  print(paramsdict)
 
   best_point = copy.deepcopy(def_point)
   # Command for default point:
@@ -777,10 +777,6 @@ if __name__ == '__main__':
   elif op.opt_alg == 'Optuna-TPE':
     BOUND_MULTIPLIER = 2 # worse points are needed for surrogate models
     sampler = optuna.samplers.TPESampler(n_startup_trials=init_points_num, seed=op.seed)
-    optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
-  elif op.opt_alg == 'Optuna-GP':
-    BOUND_MULTIPLIER = 2 # worse points are needed for Gaussign process:
-    sampler = optuna.samplers.GPSampler(deterministic_objective=True, n_startup_trials=init_points_num, seed=op.seed)
     optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
   elif op.opt_alg == 'Optuna-HillClimbing' or op.opt_alg == 'Optuna-HillClimbing-TPE':
     # If HillClimbing works alone, bound multiplier > 1 is not needed:
@@ -839,6 +835,10 @@ if __name__ == '__main__':
     calc_obj_collect_result(def_point)
     assert(max_instance_time_best_point > 0)
     assert(max_instance_time_best_point < op.max_wall_time)
+
+  # Here the default time must be known or calculated and the best time is the default:
+  assert(default_sum_time > 0 and best_sum_time > 0)
+  assert(default_sum_time == best_sum_time)
 
   # If maximum solver time is not set, assing what is available:
   if op.max_solver_time < 0:
