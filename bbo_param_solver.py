@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.15.2'
+version = '0.15.3'
 
 # A penalty coefficient for interrupted points:
 BOUND_MULTIPLIER = 2
@@ -712,9 +712,19 @@ if __name__ == '__main__':
   for cnf in cnfs:
     print(cnf)
 
+  # Read parameters and their values:
+  params = read_pcs(param_file_name)
+
+
   # Force the seed depend solver, pcs name, CNFs names, and user's seed, 
   # Algorithm index is not used here to have same seeds for all algorithms for comparison.
-  seed_string = solver_name + param_file_name + "".join(cnfs)
+  all_params_string = ''
+  for p in params:
+    values_string = [str(x) for x in p.values]
+    all_params_string += p.name + ':' + "".join(values_string)
+  #print('all_params_string : ' + all_params_string)
+  basenames_cnfs = [os.path.basename(name) for name in cnfs]
+  seed_string = os.path.basename(solver_name) + "".join(basenames_cnfs) + all_params_string
   print('seed_string : ' + seed_string)
   hash = hashlib.sha256(seed_string.encode("utf-8"))
   hex_hash = hash.hexdigest()
@@ -734,8 +744,6 @@ if __name__ == '__main__':
   op.solver_name = new_solver_name
   # Make this string empty to use only solver name from Options:
   solver_name = ''
-
-  params = read_pcs(param_file_name)
 
   # Form a default point:
   def_point = list()
