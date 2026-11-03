@@ -17,11 +17,12 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.15.3'
+version = '0.16.0'
 
-# A penalty coefficient for interrupted points:
+# Give BOUND_MULTIPLIER x t time where t is the current best time:
 BOUND_MULTIPLIER = 2
-PENALTY_INTERR_CNF = 10 # PAR10 as in ParamILS and SMAC
+# A penalty coefficient for interrupted CNFs and points:
+PENALTY_INTERR = 10 # PAR10 as in ParamILS and SMAC
 
 import sys
 import glob
@@ -45,37 +46,64 @@ import nevergrad
 
 optuna_study = None
 optuna_trial = None
+nevergrad_trial = None
+nevergrad_optimizer = None
 SWITCH_OPTIMIZER = False
 
 optalg_indices = {
     "1+1" : 0,
     "Optuna-TPE" : 1,
     "Optuna-HillClimbing" : 2,
-    "Optuna-HillClimbing-TPE" : 3
+    "Optuna-HillClimbing-TPE" : 3,
+    "Nevergrad-PortfolioDiscreteOnePlusOne" : 4,
+    "Nevergrad-DiscreteOnePlusOne" : 5,
+    "Nevergrad-NGOpt" : 6
 }
 
+# Point status:
 class PointStatus(Enum):
     GENERATED = 0 # a point is generated
     STARTED = 1 # a point is generated and the calculation is started on it
     FINISHED = 2 # a point is calculated on all instances
     INTERRUPTED = 3 # a point is calculated, but on at least one instance the SAT solver was interrupted
 
+# Point result:
+class PointResult:
+  status : PointStatus
+  value : float
+  def __init__(self, status=PointStatus.GENERATED, value=None):
+    self.status = status
+    self.value = value
+
+# Solver's parameter:
+class Param:
+  name : str
+  default : int
+  values : list
+  def __init__(self):
+    self.name = ''
+    self.default = -1
+    self.values = []
+
 # Input options:
 class Options:
-	solver_name = ''
-	opt_alg = "1+1"
-	def_point_time = -1
-	max_points = 1000
-	max_wall_time = -1
-	max_solver_time = -1
-	defpcs_file = ''
-	seed = 0
-	is_solving = False
+	solver_name : str
+	opt_alg : str
+	def_point_time : float
+	max_points : int
+	max_wall_time : float
+	max_solver_time : float
+	defpcs_file : str
+	seed : int
+	is_solving : bool
 	def __init__(self):
+		self.solver_name = ''
+		self.opt_alg = ''
 		self.def_point_time = -1
 		self.max_points = 1000
 		self.max_wall_time = 86400
 		self.max_solver_time = -1
+		self.defpcs_file = ''
 		self.seed = 0
 		self.is_solving = False
 	def __str__(self):
@@ -96,7 +124,8 @@ class Options:
 				tmp = p.split('-optalg=')[1]
 				tmp = tmp.replace("'", "")
 				self.opt_alg = tmp.replace('"', '')
-				assert(self.opt_alg in ["1+1", "Optuna-TPE", "Optuna-HillClimbing", "Optuna-HillClimbing-TPE"])
+				assert(self.opt_alg in ["1+1", "Optuna-TPE", "Optuna-HillClimbing", "Optuna-HillClimbing-TPE",\
+                                "Nevergrad-PortfolioDiscreteOnePlusOne", "Nevergrad-DiscreteOnePlusOne", "Nevergrad-NGOpt"])
 			if '-defobj=' in p:
 				self.def_point_time = math.ceil(float(p.split('-defobj=')[1]))
 			if '-maxpoints=' in p:
@@ -112,20 +141,14 @@ class Options:
 		assert(self.max_points > 0)
 		assert(self.max_wall_time > 0)
 
-# Solver's parameter:
-class Param:
-  name : str
-  default : int
-  values : list
-  def __init__(self):
-    self.name = ''
-    self.default = -1
-    self.values = []
 
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-dir [Options]')
   print('  Options :\n' +\
-  '  -optalg=[1+1, Optuna-TPE, Optina-HillClimbing, "Optuna-HillClimbing-TPE"] - (default : "1+1") type of optimization algorithm' + '\n' +\
+  '  -optalg=[1+1, ' + '\n' +\
+  '           Optuna-TPE, Optina-HillClimbing, Optuna-HillClimbing-TPE,' + '\n' +\
+  '           Nevergrad-PortfolioDiscreteOnePlusOne, Nevergrad-DiscreteOnePlusOne, Nevergrad-NGOpt]' + '\n' +\
+  '     (default : "1+1") type of optimization algorithm' + '\n' +\
   '  -defobj=<float>        - (default : -1)    objective funtion value for the default point' + '\n' +\
   '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
   '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
@@ -252,6 +275,8 @@ def ask_point():
   global generated_points
   global optuna_study
   global optuna_trial
+  global nevergrad_optimizer
+  global nevergrad_trial
 
   assert(len(best_point) == len(params))
   new_point = None
@@ -295,9 +320,33 @@ def ask_point():
       point_tuple = tuple(pnt)
       if point_tuple in generated_points:
         # The same point again, skip it.
-        # Here tell() is neede since each ask() must be paired with tell():
+        # Here tell() is needed since each ask() must be paired with tell():
         optuna_study.tell(optuna_trial, state=TrialState.PRUNED)
         skipped_points_num += 1
+        print('Same point again, skip it.')
+      else:
+        new_point = pnt
+        break
+  elif 'Nevergrad' in op.opt_alg:
+    while True:
+      nevergrad_trial = nevergrad_optimizer.ask()
+      # Extract values in the same order as in params:
+      pnt = []
+      assert(len(params) > 0)
+      for param in params:
+        # Access the suggested value by the parameter's name
+        val = nevergrad_trial.kwargs[param.name]
+        assert(val in param.values)
+        pnt.append(val)
+      point_tuple = tuple(pnt)
+      if point_tuple in generated_points:
+        # The same point again, skip it.
+        # Here tell() is needed since each ask() must be paired with tell():
+        repeated_pnt = generated_points[point_tuple]
+        assert(repeated_pnt.status == PointStatus.FINISHED or repeated_pnt.status == PointStatus.INTERRUPTED)
+        nevergrad_optimizer.tell(nevergrad_trial, repeated_pnt.value)
+        skipped_points_num += 1
+        print('Same point again, skip it.')
       else:
         new_point = pnt
         break
@@ -307,7 +356,8 @@ def ask_point():
   assert(new_point != best_point)
   point_tuple = tuple(new_point)
   assert(point_tuple not in generated_points)
-  generated_points[point_tuple] = PointStatus.GENERATED
+  # At the moment function's value is None:
+  generated_points[point_tuple] = PointResult(PointStatus.GENERATED, None)
 
   return new_point
 
@@ -341,9 +391,9 @@ def calc_obj(point : list):
   assert(len(op.solver_name) > 0)
   # A point to calculate must be marked as GENERATED:
   tuple_point = tuple(point)
-  assert(generated_points[tuple_point] == PointStatus.GENERATED)
+  assert(generated_points[tuple_point].status == PointStatus.GENERATED)
   # Mark that the calculation is STARTED:
-  generated_points[tuple_point] = PointStatus.STARTED
+  generated_points[tuple_point] = PointResult(PointStatus.STARTED, None)
   cur_sum_time = 0.0
   max_instance_time = -1
   # Calculate sum for the solver runtimes:
@@ -364,22 +414,29 @@ def calc_obj(point : list):
     sys_str = ''
     # Check the left time:
     elapsed_time = round(time.time() - start_time, 2)
-    avail_time = op.max_wall_time - elapsed_time
+    avail_wall_time = op.max_wall_time - elapsed_time
     # If no time is left, do not run the solver:
-    if avail_time <= 0:
-      print('Break: negative available wall time ' + str(avail_time))
+    if avail_wall_time <= 0:
+      print('Break: negative available wall time ' + str(avail_wall_time))
       is_interrupted_point = True
       break
     # Update the solver limit to not exceed the wall limit:
-    if best_sum_time > 0 and (avail_time > 0 and avail_time < solver_time_lim):
-      print('Changing solver time limit to available wall time ' + str(avail_time))
-      solver_time_lim = avail_time
+    if best_sum_time > 0 and (avail_wall_time > 0 and avail_wall_time < solver_time_lim):
+      print('Changing solver time limit to available wall time ' + str(avail_wall_time))
+      solver_time_lim = avail_wall_time
+    # Calculate the remaining time for the current point:
+    if best_sum_time > 0:
+      remaining_point_time = round(best_sum_time * BOUND_MULTIPLIER - cur_sum_time, 2)
+      assert(remaining_point_time > 0)
+      if solver_time_lim > remaining_point_time:
+        solver_time_lim = remaining_point_time
+        print('solver_time_lim was decreased to remaining point time ' + str(solver_time_lim))
     assert(solver_time_lim > 0)
     rounded_solver_time_lim = math.ceil(solver_time_lim)
     assert(rounded_solver_time_lim > 0)
     sys_str = op.solver_name
     if 'kissat' in op.solver_name:
-        sys_str += ' -n' # do not print satisfying assignment to save time
+      sys_str += ' -n' # do not print satisfying assignment to save time
     sys_str += ' --time=' + str(rounded_solver_time_lim) + ' '
     for i in range(len(params)):
       sys_str += '--' + params[i].name + '=' + str(point[i]) + ' '
@@ -401,7 +458,8 @@ def calc_obj(point : list):
     # If the solver is interrupted at least once,
     if sat == -1 or (solver_time_lim > 0 and t >= solver_time_lim):
       # PAR10 penalty for an interrupted CNF:
-      t = op.max_solver_time * PENALTY_INTERR_CNF 
+      assert(op.max_solver_time > 0)
+      t = op.max_solver_time * PENALTY_INTERR
     else:
       assert(sat == 1) # SAT should be here
       sat_num += 1
@@ -421,8 +479,8 @@ def calc_obj(point : list):
     if cnf_num < len(cnfs):
       # If the current value is already worse than the best one
       if best_sum_time > 0 and cur_sum_time >= best_sum_time * BOUND_MULTIPLIER:
-        print('Current obj func value ' + str(cur_sum_time) + ' is already worse than ' + \
-              str(BOUND_MULTIPLIER) + 'x ' + str(best_sum_time))
+        print('Current obj func value ' + str(round(cur_sum_time, 2)) + ' is already worse than ' + \
+          str(BOUND_MULTIPLIER) + 'x ' + str(best_sum_time))
         print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
         is_interrupted_point = True
         break
@@ -440,6 +498,7 @@ def calc_obj(point : list):
   if sat_num < len(cnfs):
     is_interrupted_point = True
   #print('Obj func value : ' + str(cur_sum_time))
+  cur_sum_time = round(cur_sum_time, 2)
   return point, cur_sum_time, max_instance_time, sys_str, is_interrupted_point
 
 
@@ -465,7 +524,7 @@ def collect_result(res : tuple):
   #print('Sum time in collect_result : ' + str(cur_sum_time) + ' seconds')
   #print('max_wall_time : ' + str(max_wall_time) + ' seconds')
   tuple_point = tuple(point)
-  assert(generated_points[tuple_point] == PointStatus.STARTED)
+  assert(generated_points[tuple_point].status == PointStatus.STARTED)
   # If a new record point is found:
   if (is_interrupted_point == False and cur_sum_time > 0) and (cur_sum_time < best_sum_time or best_sum_time <= 0):
     updates_num += 1
@@ -493,19 +552,20 @@ def collect_result(res : tuple):
   tell_time = cur_sum_time
   if is_interrupted_point == False:
     assert(cur_sum_time > 0)
-    generated_points[tuple_point] = PointStatus.FINISHED
+    generated_points[tuple_point] = PointResult(PointStatus.FINISHED, cur_sum_time)
     if cur_sum_time > best_sum_time and best_sum_time > 0:
-        worse_than_best_but_calc_points_num += 1
+      worse_than_best_but_calc_points_num += 1
     print('Finished point with sum_time ' + str(cur_sum_time) + ' , max_inst_time ' + str(max_instance_time))
   else:
     # Calculate a 2 x cur-best-time penalty for interuupted points as in ParamILS and SMAC:
     assert(best_sum_time > 0)
     assert(BOUND_MULTIPLIER >= 1)
-    penalty_sum_time = best_sum_time * BOUND_MULTIPLIER
-    tell_time = penalty_sum_time
+    penalty_sum_time = best_sum_time * PENALTY_INTERR
     assert(penalty_sum_time > 0)
-    generated_points[tuple_point] = PointStatus.INTERRUPTED
+    generated_points[tuple_point] = PointResult(PointStatus.INTERRUPTED, penalty_sum_time)
+    tell_time = penalty_sum_time
   assert(tell_time > 0)
+
   # Tell Optuna the objective function value:
   if 'Optuna' in op.opt_alg:
     assert(type(optuna_trial) != types.NoneType)
@@ -514,6 +574,12 @@ def collect_result(res : tuple):
       optuna_study.tell(optuna_trial, state=TrialState.PRUNED)
     else:
       optuna_study.tell(optuna_trial, tell_time)
+  # Tell Nevergrad the objective function value:
+  elif 'Nevergrad' in op.opt_alg:
+    assert(type(nevergrad_trial) != types.NoneType)
+    # Nevegrad can not mark a point as PRUNED like Optuna, so
+    # give an actual function value (penalized if interrupted);
+    nevergrad_optimizer.tell(nevergrad_trial, tell_time)
   assert(best_sum_time > 0)
 
 
@@ -576,8 +642,8 @@ def write_final_pcs(best_point : list, params : list, cnfs : list):
 def processed(generated_points : dict):
   res = 0
   for point_tuple in generated_points:
-     if generated_points[point_tuple] == PointStatus.FINISHED or \
-     generated_points[point_tuple] == PointStatus.INTERRUPTED:
+     if generated_points[point_tuple].status == PointStatus.FINISHED or \
+     generated_points[point_tuple].status == PointStatus.INTERRUPTED:
         res += 1
   return res
 
@@ -585,16 +651,16 @@ def processed(generated_points : dict):
 def finished(generated_points : dict):
   res = 0
   for point_tuple in generated_points:
-     if generated_points[point_tuple] == PointStatus.FINISHED:
-        res += 1
+    if generated_points[point_tuple].status == PointStatus.FINISHED:
+      res += 1
   return res
 
 
 def interrupted(generated_points : dict):
   res = 0
   for point_tuple in generated_points:
-     if generated_points[point_tuple] == PointStatus.INTERRUPTED:
-        res += 1
+    if generated_points[point_tuple].status == PointStatus.INTERRUPTED:
+      res += 1
   return res
 
 
@@ -605,13 +671,13 @@ def stat(generated_points : dict):
   finished_num = 0
   interrupted_num = 0
   for point_tuple in generated_points:
-      if generated_points[point_tuple] == PointStatus.GENERATED:
+      if generated_points[point_tuple].status == PointStatus.GENERATED:
          generated_num += 1
-      elif generated_points[point_tuple] == PointStatus.STARTED:
+      elif generated_points[point_tuple].status == PointStatus.STARTED:
          started_num += 1
-      elif generated_points[point_tuple] == PointStatus.FINISHED:
+      elif generated_points[point_tuple].status == PointStatus.FINISHED:
          finished_num += 1
-      elif generated_points[point_tuple] == PointStatus.INTERRUPTED:
+      elif generated_points[point_tuple].status == PointStatus.INTERRUPTED:
          interrupted_num += 1
   res = str(generated_num) + ' only generated\n' + \
     str(started_num) + ' started\n' + \
@@ -626,6 +692,16 @@ def print_optuna_trials():
   complete_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.COMPLETE,)))
   pruned_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.PRUNED,)))
   print(f"COMPLETED: {complete_count}, PRUNED: {pruned_count}")
+
+def print_nevergrad_trials():
+  assert(nevergrad_optimizer != None)
+  print(f"Nevergrad archive contains {len(nevergrad_optimizer.archive.bytesdict)} unique points (some could be pruned) :")
+  for byte_key, value_obj in nevergrad_optimizer.archive.bytesdict.items():
+    # Convert the byte key back to a numpy array of parameter values
+    #point_array = np.frombuffer(byte_key)
+    #print(f"Point: {point_array}")
+    print(f"Function's value: {value_obj.mean}") # 1 evaluation so 'mean' here is the function's value 
+    #print(f"  Count: {value_obj.count}") # Number of times this point was evaluated[reference:6]
 
 def switch_to_tpe(seed : int):
   global optuna_study
@@ -804,6 +880,40 @@ if __name__ == '__main__':
     print('op.seed : ' + str(op.seed))
     sampler = mod.HillClimbingSampler(search_space=search_space, max_restarts=op.max_points, seed=op.seed) 
     optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
+  elif 'Nevergrad' in op.opt_alg:
+    BOUND_MULTIPLIER = 1
+    # Set the global seed for Nevergrad:
+    np.random.seed(op.seed)
+    parametrization = nevergrad.p.Instrumentation(
+      **{
+          p.name : nevergrad.p.TransitionChoice(p.values)
+          for p in params
+      }
+    )
+    #print(parametrization)
+    # If the maximum number of points is given, use it as bugdet, otherwise None:
+    # If budget is not None, than at most budget points will be processed,
+    # so op.max_points must be an upper bound (say, 100 thousand):
+    budget = op.max_points if op.max_points > 0 else None
+    if op.opt_alg == 'Nevergrad-PortfolioDiscreteOnePlusOne':
+      nevergrad_optimizer = nevergrad.optimizers.PortfolioDiscreteOnePlusOne(
+        parametrization=parametrization,
+        budget=budget,
+        num_workers=1  # Sequential ask-and-tell
+      )
+    elif op.opt_alg == 'Nevergrad-DiscreteOnePlusOne':
+      nevergrad_optimizer = nevergrad.optimizers.DiscreteOnePlusOne(
+        parametrization=parametrization,
+        budget=budget,
+        num_workers=1  # Sequential ask-and-tell
+      )
+    elif op.opt_alg == 'Nevergrad-NGOpt':
+       nevergrad_optimizer = nevergrad.optimizers.NGOpt(
+        parametrization=parametrization,
+        budget=budget,
+        num_workers=1  # Sequential ask-and-tell
+      )
+    assert(nevergrad_optimizer != None)
 
   print('BOUND_MULTIPLIER : ' + str(BOUND_MULTIPLIER))
   updates_num = 0
@@ -821,24 +931,32 @@ if __name__ == '__main__':
   # If runtime on default point is given, mark it as finished:
   point_tuple = tuple(def_point)
   # Add the default point to Optuna's queue and ask() this point:
+  trial_params = {param.name: val for param, val in zip(params, def_point)}
   if 'Optuna' in op.opt_alg:
-    trial_params = {param.name: val for param, val in zip(params, def_point)}
+    assert(len(trial_params) == len(def_point))
     optuna_study.enqueue_trial(trial_params)
     optuna_trial = optuna_study.ask()
     # These suggest_categorical() are required by Optuna for every asked point:
     for param in params:
       val = optuna_trial.suggest_categorical(param.name, param.values)
+  elif 'Nevergrad' in op.opt_alg:
+    # Give the default point and ask() for it:
+    nevergrad_optimizer.suggest(**trial_params)
+    nevergrad_trial = nevergrad_optimizer.ask()
+  
   # If time for default point is given, update penalty sum time:
   if default_sum_time > 0:
-    generated_points[point_tuple] = PointStatus.FINISHED
+    generated_points[point_tuple] = PointResult(PointStatus.FINISHED, default_sum_time)
     print('The default point is given, so it is marked as finished.')
     assert(op.max_solver_time > 0)
     assert(optuna_trial != types.NoneType)
     if 'Optuna' in op.opt_alg:
       optuna_study.tell(optuna_trial, default_sum_time)
+    elif 'Nevegrad' in op.opt_alg:
+      nevergrad_optimizer.tell(nevergrad_trial, default_sum_time)
   else:
     # otherwise, add the default point to the queue for processing:
-    generated_points[point_tuple] = PointStatus.GENERATED
+    generated_points[point_tuple] = PointResult(PointStatus.GENERATED, None)
     print('Calculating objective function in the default point')
     calc_obj_collect_result(def_point)
     assert(max_instance_time_best_point > 0)
@@ -851,7 +969,7 @@ if __name__ == '__main__':
   # If maximum solver time is not set, assing what is available:
   if op.max_solver_time < 0:
     if max_instance_time_best_point > 0:
-      op.max_solver_time = max_instance_time_best_point
+      op.max_solver_time = max_instance_time_best_point * BOUND_MULTIPLIER
     else:
       op.max_solver_time = op.max_wall_time
     print('max_solver_time is not set, so it was changed to ' + str(op.max_solver_time))
@@ -957,3 +1075,5 @@ if __name__ == '__main__':
     print(str(complete_trials_num) + ' complete trials')
     print(str(fail_trials_num) + ' fail trials')
     print_optuna_trials()
+  elif nevergrad_optimizer != None:
+    print_nevergrad_trials()

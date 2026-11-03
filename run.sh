@@ -1,6 +1,6 @@
 timelim=43200
 pointslim=10000
-for alg in 1+1 Optuna-TPE Optuna-HillClimbing Optuna-GP Optuna-HillClimbing-TPE
+for alg in 1+1 Optuna-TPE Optuna-HillClimbing Optuna-HillClimbing-TPE
 do
     echo $alg
     python3 ./bbo_param_solver.py ./kissat4.0.1_quiet ./kissat4.0.1_reduced.pcs ./cnfs_easy/ -optalg=${alg} -seed=0 -maxpoints=${pointslim} -maxtime=$timelim &> out_${alg} &
