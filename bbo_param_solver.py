@@ -17,9 +17,9 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.16.0'
+version = '0.16.1'
 
-# Give BOUND_MULTIPLIER x t time where t is the current best time:
+# Like in ParamILS, give BOUND_MULTIPLIER x t time where t is the current best time:
 BOUND_MULTIPLIER = 2
 # A penalty coefficient for interrupted CNFs and points:
 PENALTY_INTERR = 10 # PAR10 as in ParamILS and SMAC
@@ -51,13 +51,12 @@ nevergrad_optimizer = None
 SWITCH_OPTIMIZER = False
 
 optalg_indices = {
-    "1+1" : 0,
-    "Optuna-TPE" : 1,
-    "Optuna-HillClimbing" : 2,
-    "Optuna-HillClimbing-TPE" : 3,
-    "Nevergrad-PortfolioDiscreteOnePlusOne" : 4,
-    "Nevergrad-DiscreteOnePlusOne" : 5,
-    "Nevergrad-NGOpt" : 6
+    "Optuna-TPE" : 0,
+    "Optuna-HillClimbing" : 1,
+    "Optuna-HillClimbing-TPE" : 2,
+    "Nevergrad-PortfolioDiscreteOnePlusOne" : 3,
+    "Nevergrad-DiscreteOnePlusOne" : 4,
+    "Nevergrad-NGOpt" : 5
 }
 
 # Point status:
@@ -98,7 +97,7 @@ class Options:
 	is_solving : bool
 	def __init__(self):
 		self.solver_name = ''
-		self.opt_alg = ''
+		self.opt_alg = "Optuna-TPE"
 		self.def_point_time = -1
 		self.max_points = 1000
 		self.max_wall_time = 86400
@@ -124,7 +123,7 @@ class Options:
 				tmp = p.split('-optalg=')[1]
 				tmp = tmp.replace("'", "")
 				self.opt_alg = tmp.replace('"', '')
-				assert(self.opt_alg in ["1+1", "Optuna-TPE", "Optuna-HillClimbing", "Optuna-HillClimbing-TPE",\
+				assert(self.opt_alg in ["Optuna-TPE", "Optuna-HillClimbing", "Optuna-HillClimbing-TPE",\
                                 "Nevergrad-PortfolioDiscreteOnePlusOne", "Nevergrad-DiscreteOnePlusOne", "Nevergrad-NGOpt"])
 			if '-defobj=' in p:
 				self.def_point_time = math.ceil(float(p.split('-defobj=')[1]))
@@ -145,10 +144,9 @@ class Options:
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-dir [Options]')
   print('  Options :\n' +\
-  '  -optalg=[1+1, ' + '\n' +\
-  '           Optuna-TPE, Optina-HillClimbing, Optuna-HillClimbing-TPE,' + '\n' +\
+  '  -optalg=[Optuna-TPE, Optina-HillClimbing, Optuna-HillClimbing-TPE,' + '\n' +\
   '           Nevergrad-PortfolioDiscreteOnePlusOne, Nevergrad-DiscreteOnePlusOne, Nevergrad-NGOpt]' + '\n' +\
-  '     (default : "1+1") type of optimization algorithm' + '\n' +\
+  '     (default : "Optuna-TPE") type of optimization algorithm' + '\n' +\
   '  -defobj=<float>        - (default : -1)    objective funtion value for the default point' + '\n' +\
   '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
   '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
@@ -268,7 +266,7 @@ def equalparamval(paramname : str, point1 : list, point2 : list, inddict : dict)
   return point1[inddict[paramname]] == point2[inddict[paramname]]
 
 
-# Generate new points via (1+1)-EA or ask-tell interface:
+# Generate new points via ask-tell interface:
 def ask_point():
   # Here are only global variables which are changed in this function: 
   global skipped_points_num
@@ -280,28 +278,7 @@ def ask_point():
 
   assert(len(best_point) == len(params))
   new_point = None
-  if op.opt_alg == "1+1":
-     # Change each value with probability:
-    while True:
-      pnt = copy.deepcopy(best_point)
-      # With probability 36 % the point is the same, so do until it is a new one:
-      while pnt == best_point:
-        for i in range(len(params)):
-          prob = random.random()
-          if (prob <= 1/len(params)):
-            pnt[i] = next_value(params[i].values, pnt[i])
-      assert(pnt != best_point)
-      point_tuple = tuple(pnt)
-      # If point has been already generated:
-      if point_tuple in generated_points:
-        # The same point again, skip it:
-        skipped_points_num += 1
-        #print(str(skipped_points_num) + ' repeated points skipped')
-      else:
-        # New point and possible combination:
-        new_point = pnt
-        break
-  elif 'Optuna' in op.opt_alg: # Optuna-TPE, Optuna-HillCLimbing, Optuna-HillClimbing-TPE
+  if 'Optuna' in op.opt_alg: # Optuna-TPE, Optuna-HillCLimbing, Optuna-HillClimbing-TPE
     # Check whether Optuna initializatoin was done:
     assert(type(optuna_study) != types.NoneType)
     # Take a new point from Optuna.
@@ -560,7 +537,7 @@ def collect_result(res : tuple):
     # Calculate a 2 x cur-best-time penalty for interuupted points as in ParamILS and SMAC:
     assert(best_sum_time > 0)
     assert(BOUND_MULTIPLIER >= 1)
-    penalty_sum_time = best_sum_time * PENALTY_INTERR
+    penalty_sum_time = round(best_sum_time * PENALTY_INTERR, 2)
     assert(penalty_sum_time > 0)
     generated_points[tuple_point] = PointResult(PointStatus.INTERRUPTED, penalty_sum_time)
     tell_time = penalty_sum_time
@@ -688,10 +665,12 @@ def stat(generated_points : dict):
 def print_optuna_trials():
   # View summary of all trials:
   df = optuna_study.trials_dataframe(attrs=('number', 'value', 'params', 'state'))
-  print(df.to_string())
   complete_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.COMPLETE,)))
   pruned_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.PRUNED,)))
   print(f"COMPLETED: {complete_count}, PRUNED: {pruned_count}")
+  #print(completed_df.to_string())
+  print('Completed trials :')
+  print(df[df["state"] == "COMPLETE"])
 
 def print_nevergrad_trials():
   assert(nevergrad_optimizer != None)
@@ -705,7 +684,6 @@ def print_nevergrad_trials():
 
 def switch_to_tpe(seed : int):
   global optuna_study
-  global BOUND_MULTIPLIER
   global SWITCH_OPTIMIZER
   assert(SWITCH_OPTIMIZER == False)
   SWITCH_OPTIMIZER = True
@@ -745,13 +723,11 @@ def switch_to_tpe(seed : int):
   assert(processed_points_num <= reconstructed_trials_num)
   if processed_points_num < reconstructed_trials_num:
     print(str(reconstructed_trials_num - processed_points_num) + ' of these trials are repeated (skipped) points')
-  BOUND_MULTIPLIER = 2 # worse points are needed for surrogate models
   # 0 startup trials since they are random - we will use HillClimbing's points instead:
   sampler = optuna.samplers.TPESampler(n_startup_trials=0, seed=op.seed)
   optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
   optuna_study.add_trials(reconstructed_trials)
   print('Switched from HillClimbing to TPE, and added trials, seed=' + str(seed))
-  print('BOUND_MULTIPLIER : ' + str(BOUND_MULTIPLIER))
   print('List of added trials :')
   print_optuna_trials()
 
@@ -771,13 +747,13 @@ if __name__ == '__main__':
   param_file_name = sys.argv[2]
   cnfs_dir_name = sys.argv[3]
 
+  print('BOUND_MULTIPLIER : ' + str(BOUND_MULTIPLIER))
   print('solver_name      : ' + solver_name)
   print('param_file_name  : ' + param_file_name)
   print('cnfs_dir_name    : ' + cnfs_dir_name)
 
   op = Options()
   op.read(sys.argv[3:])
-  print(op)
 
   # Read CNFs:
   cnfs = []
@@ -791,7 +767,6 @@ if __name__ == '__main__':
   # Read parameters and their values:
   params = read_pcs(param_file_name)
 
-
   # Force the seed depend solver, pcs name, CNFs names, and user's seed, 
   # Algorithm index is not used here to have same seeds for all algorithms for comparison.
   all_params_string = ''
@@ -801,7 +776,7 @@ if __name__ == '__main__':
   #print('all_params_string : ' + all_params_string)
   basenames_cnfs = [os.path.basename(name) for name in cnfs]
   seed_string = os.path.basename(solver_name) + "".join(basenames_cnfs) + all_params_string
-  print('seed_string : ' + seed_string)
+  #print('seed_string : ' + seed_string)
   hash = hashlib.sha256(seed_string.encode("utf-8"))
   hex_hash = hash.hexdigest()
   int_hash = int(hex_hash, 16)
@@ -810,7 +785,11 @@ if __name__ == '__main__':
   op.seed = (op.seed + int_hash) % (2**32)
   print('Updated seed : ' + str(op.seed))
 
+  # random is used in the script:
   random.seed(op.seed)
+  # np.random is used by Nevegrad:
+  np.random.seed(op.seed)
+  
   random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k = 10))
   random_str += '_' + op.opt_alg
   print("The randomly generated string for algorithm " + op.opt_alg + " is : " + str(random_str))
@@ -818,8 +797,9 @@ if __name__ == '__main__':
   new_solver_name = create_solver_copy(solver_name, random_str)
   print('Solver name is changed to ' + new_solver_name)
   op.solver_name = new_solver_name
-  # Make this string empty to use only solver name from Options:
-  solver_name = ''
+
+  # Print the final options:
+  print(op)
 
   # Form a default point:
   def_point = list()
@@ -856,20 +836,10 @@ if __name__ == '__main__':
   print('init_points_num for ask-and-tell algorithm : ' + str(init_points_num))
 
   # Initialize sktopt optimizer if needed:
-  if op.opt_alg == "1+1":
-    BOUND_MULTIPLIER = 1
-  elif op.opt_alg == 'Optuna-TPE':
-    BOUND_MULTIPLIER = 2 # worse points are needed for surrogate models
+  if op.opt_alg == 'Optuna-TPE':
     sampler = optuna.samplers.TPESampler(n_startup_trials=init_points_num, seed=op.seed)
     optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
   elif op.opt_alg == 'Optuna-HillClimbing' or op.opt_alg == 'Optuna-HillClimbing-TPE':
-    # If HillClimbing works alone, bound multiplier > 1 is not needed:
-    if op.opt_alg == 'Optuna-HillClimbing':
-      BOUND_MULTIPLIER = 1
-    # Otherwise, bound multiplier = 2 since both good and bad completed points
-    # are needed for a surrogate model in TPE: 
-    elif op.opt_alg == 'Optuna-HillClimbing-TPE':
-      BOUND_MULTIPLIER = 2
     mod = optunahub.load_module("samplers/hill_climbing")
     # Set the limit of restarts to the limit of points to stay in HillClimbing mode,
     # otherwise HillClimbing can switch to Random search.
@@ -881,9 +851,7 @@ if __name__ == '__main__':
     sampler = mod.HillClimbingSampler(search_space=search_space, max_restarts=op.max_points, seed=op.seed) 
     optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
   elif 'Nevergrad' in op.opt_alg:
-    BOUND_MULTIPLIER = 1
     # Set the global seed for Nevergrad:
-    np.random.seed(op.seed)
     parametrization = nevergrad.p.Instrumentation(
       **{
           p.name : nevergrad.p.TransitionChoice(p.values)
@@ -915,7 +883,6 @@ if __name__ == '__main__':
       )
     assert(nevergrad_optimizer != None)
 
-  print('BOUND_MULTIPLIER : ' + str(BOUND_MULTIPLIER))
   updates_num = 0
   max_instance_time_best_point = -1
   skipped_points_num = 0
