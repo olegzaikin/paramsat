@@ -1,4 +1,4 @@
-timelim=86400
+timelim=3600
 pointslim=10000
 for alg in Optuna-TPE Optuna-HillClimbing Optuna-HillClimbing-TPE Nevergrad-PortfolioDiscreteOnePlusOne Nevergrad-DiscreteOnePlusOne Nevergrad-NGOpt
 do

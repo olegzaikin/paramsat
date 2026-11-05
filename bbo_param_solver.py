@@ -17,7 +17,7 @@
 # 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.16.1'
+version = '0.16.2'
 
 # Like in ParamILS, give BOUND_MULTIPLIER x t time where t is the current best time:
 BOUND_MULTIPLIER = 2
@@ -668,9 +668,8 @@ def print_optuna_trials():
   complete_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.COMPLETE,)))
   pruned_count = len(optuna_study.get_trials(states=(optuna.trial.TrialState.PRUNED,)))
   print(f"COMPLETED: {complete_count}, PRUNED: {pruned_count}")
-  #print(completed_df.to_string())
   print('Completed trials :')
-  print(df[df["state"] == "COMPLETE"])
+  print(df[df["state"] == "COMPLETE"].to_string())
 
 def print_nevergrad_trials():
   assert(nevergrad_optimizer != None)
