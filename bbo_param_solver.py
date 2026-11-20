@@ -14,10 +14,9 @@
 #
 # TODOs:
 # 0. Extend to unsatisfiable CNFs.
-# 1. Parallel version
 
 script_name = "bbo_param_solver.py"
-version = '0.16.2'
+version = '0.2.0'
 
 # Like in ParamILS, give BOUND_MULTIPLIER x t time where t is the current best time:
 BOUND_MULTIPLIER = 2
@@ -39,8 +38,8 @@ import numpy as np
 import types
 import hashlib
 import optuna
-from optuna.distributions import CategoricalDistribution
-from optuna.trial import TrialState
+import optuna.distributions
+import optuna.trial
 import optunahub
 import nevergrad
 
@@ -83,11 +82,17 @@ class Param:
     self.name = ''
     self.default = -1
     self.values = []
+  def __str__(self):
+    s = self.name + ' default : ' + str(self.default) + ' ; values : ['
+    for x in self.values:
+       s += str(x) + ' '
+    return s[:-1] + ']'
 
 # Input options:
 class Options:
 	solver_name : str
 	opt_alg : str
+	space_type : str
 	def_point_time : float
 	max_points : int
 	max_wall_time : float
@@ -97,7 +102,8 @@ class Options:
 	is_solving : bool
 	def __init__(self):
 		self.solver_name = ''
-		self.opt_alg = "Optuna-TPE"
+		self.opt_alg = 'Optuna-TPE'
+		self.space_type = 'categ'
 		self.def_point_time = -1
 		self.max_points = 1000
 		self.max_wall_time = 86400
@@ -110,6 +116,7 @@ class Options:
 		s = '' +\
     'solver_name     : ' + self.solver_name + '\n' +\
     'opt_alg         : ' + self.opt_alg + '\n' +\
+    'space_type      : ' + self.space_type + '\n' +\
     'def_point_time  : ' + str(self.def_point_time) + '\n' +\
 		'max_points      : ' + str(self.max_points) + '\n' +\
 		'max_wall_time   : ' + str(self.max_wall_time) + '\n' +\
@@ -124,7 +131,12 @@ class Options:
 				tmp = tmp.replace("'", "")
 				self.opt_alg = tmp.replace('"', '')
 				assert(self.opt_alg in ["Optuna-TPE", "Optuna-HillClimbing", "Optuna-HillClimbing-TPE",\
-                                "Nevergrad-PortfolioDiscreteOnePlusOne", "Nevergrad-DiscreteOnePlusOne", "Nevergrad-NGOpt"])
+                                "Nevergrad-PortfolioDiscreteOnePlusOne", "Nevergrad-DiscreteOnePlusOne",\
+                                "Nevergrad-NGOpt"])
+			if '-spacetype=' in p:
+				self.space_type = p.split('-spacetype=')[1]
+        # 3, > 200, > 10000, > 1073741824
+				assert(self.space_type in ['categ', 'interval', 'log1', 'log2', 'log3', 'log4'])
 			if '-defobj=' in p:
 				self.def_point_time = math.ceil(float(p.split('-defobj=')[1]))
 			if '-maxpoints=' in p:
@@ -140,13 +152,13 @@ class Options:
 		assert(self.max_points > 0)
 		assert(self.max_wall_time > 0)
 
-
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-dir [Options]')
   print('  Options :\n' +\
   '  -optalg=[Optuna-TPE, Optina-HillClimbing, Optuna-HillClimbing-TPE,' + '\n' +\
   '           Nevergrad-PortfolioDiscreteOnePlusOne, Nevergrad-DiscreteOnePlusOne, Nevergrad-NGOpt]' + '\n' +\
   '     (default : "Optuna-TPE") type of optimization algorithm' + '\n' +\
+  '  -spacetype=<string>    - (default : categ) categ|interval|log1|log2|log3|log4' + '\n' +\
   '  -defobj=<float>        - (default : -1)    objective funtion value for the default point' + '\n' +\
   '  -maxpoints=<int>       - (default : 1000)  maximum number of points to process' + '\n' +\
   '  -maxtime=<int>         - (default : 86400) maximum script wall time' + '\n' +\
@@ -155,14 +167,12 @@ def print_usage():
   '  --solving              - (default : off)   solving mode' + '\n' +\
   'NB: Points from the -pointsfile are used along with those which are generated.')
 
-
 # Convert string to int if not Boolean:
 def convert_if_int(x : str):
   if x in ['true', 'false']:
     return x
   assert(x.isnumeric())
   return int(x)
-
 
 # Read SAT solver's parameters:
 def read_pcs(param_file_name : str):
@@ -180,23 +190,23 @@ def read_pcs(param_file_name : str):
       #print(words)
       prm = Param()
       prm.name = words[0]
+      # Example: backbone {0, 1, 2}[1]
       defstr = line.split('[')[1].split(']')[0]
       prm.default = convert_if_int(defstr)
-      valuesstr = line.split('{')[1].split('}')[0].replace(' ', '')
-      lst = valuesstr.split(',')
+      lst = line.split('{')[1].split('}')[0].replace(' ', '')
+      valuesstr = lst.split(',')
+      assert(len(lst) >= 2)
       #print(lst)
-      for x in lst:
-          prm.values.append(convert_if_int(x))
-      assert(len(prm.values) > 1)
-      assert(prm.default in ['true', 'false'] or isinstance(prm.default, int))
-      #print(str(len(prm.values)))
+      for x in valuesstr:
+        prm.values.append(convert_if_int(x))
+      assert(len(prm.values) >= 2)
       for val in prm.values:
-        #print(val)
         assert(val in ['true', 'false'] or isinstance(val, int))
+      assert(prm.default in prm.values)
+      assert(prm.values[0] <= prm.default <= prm.values[-1])
       params.append(prm)
   assert(len(params) > 0)
   return params
-
 
 # Parse a CDCL solver's log:
 def parse_cdcl_result(cdcl_log : str):
@@ -218,7 +228,6 @@ def parse_cdcl_result(cdcl_log : str):
 	assert(t >= 0)
 	return t, sat
 
-
 # Kill a solver:
 def kill_solver(solver_name : str):
   assert(solver_name != '')
@@ -228,15 +237,13 @@ def kill_solver(solver_name : str):
   subprocess.run(sys_str, shell=True)
   time.sleep(1)
 
-
 # Create a copy of a given solver to kill the latter safely:
-def create_solver_copy(solver_name : str, random_str : str):
-  new_solver_name = solver_name + '_' + random_str
+def create_solver_copy(solver_name : str, space_type : str, random_str : str):
+  new_solver_name = solver_name + '_' + space_type + '_' + random_str
   print("Creating solver " + new_solver_name)
   sys_str = 'cp ' + solver_name + ' ' + new_solver_name
   subprocess.run(sys_str, shell=True)
   return new_solver_name
-
 
 # Randomly choose an element from a given list except given current value.
 # The closer index is to the given one, the higher probability is to be chosen.
@@ -259,15 +266,17 @@ def next_value(lst : list, cur_val : int):
   assert(r[0] != cur_val)
   return r[0]
 
-
 # Whether two given points are equal:
 def equalparamval(paramname : str, point1 : list, point2 : list, inddict : dict):
   assert(paramname in inddict)
   return point1[inddict[paramname]] == point2[inddict[paramname]]
 
+# Get a point (array of values) from Optuna trial:
+def point_from_optuna_trial(optuna_trial, params : list):
+  return [optuna_trial.params[p.name] for p in params]
 
 # Generate new points via ask-tell interface:
-def ask_point():
+def ask_point(params : list, op : Options, log_threshold : int):
   # Here are only global variables which are changed in this function: 
   global skipped_points_num
   global generated_points
@@ -275,7 +284,6 @@ def ask_point():
   global optuna_trial
   global nevergrad_optimizer
   global nevergrad_trial
-
   assert(len(best_point) == len(params))
   new_point = None
   if 'Optuna' in op.opt_alg: # Optuna-TPE, Optuna-HillCLimbing, Optuna-HillClimbing-TPE
@@ -287,18 +295,14 @@ def ask_point():
     # (this will not erease the existing result for this point).
     # That is why a loop is used here:
     while True:
-      optuna_trial = optuna_study.ask()
-      pnt = []
-      assert(len(params) > 0)
-      for param in params:
-        val = optuna_trial.suggest_categorical(param.name, param.values)
-        assert(val in param.values)
-        pnt.append(val)
+      optuna_trial = optuna_study.ask(optuna_search_space)
+      pnt = point_from_optuna_trial(optuna_trial, params)
+      assert(len(pnt) == len(params))
       point_tuple = tuple(pnt)
       if point_tuple in generated_points:
         # The same point again, skip it.
         # Here tell() is needed since each ask() must be paired with tell():
-        optuna_study.tell(optuna_trial, state=TrialState.PRUNED)
+        optuna_study.tell(optuna_trial, state=optuna.trial.TrialState.PRUNED)
         skipped_points_num += 1
         print('Same point again, skip it.')
       else:
@@ -313,7 +317,7 @@ def ask_point():
       for param in params:
         # Access the suggested value by the parameter's name
         val = nevergrad_trial.kwargs[param.name]
-        assert(val in param.values)
+        assert(val >= param.values[0] and val <= param.values[-1])
         pnt.append(val)
       point_tuple = tuple(pnt)
       if point_tuple in generated_points:
@@ -327,7 +331,6 @@ def ask_point():
       else:
         new_point = pnt
         break
-
   assert(type(new_point) != types.NoneType)
   assert(len(new_point) == len(params))
   assert(new_point != best_point)
@@ -335,9 +338,7 @@ def ask_point():
   assert(point_tuple not in generated_points)
   # At the moment function's value is None:
   generated_points[point_tuple] = PointResult(PointStatus.GENERATED, None)
-
   return new_point
-
 
 # Difference between two given points (empty string if equal points):
 def points_diff(p1 : list, p2 : list, params : list):
@@ -548,7 +549,7 @@ def collect_result(res : tuple):
     assert(type(optuna_trial) != types.NoneType)
     # Give an actual function value only if not interrupted:
     if is_interrupted_point:
-      optuna_study.tell(optuna_trial, state=TrialState.PRUNED)
+      optuna_study.tell(optuna_trial, state=optuna.trial.TrialState.PRUNED)
     else:
       optuna_study.tell(optuna_trial, tell_time)
   # Tell Nevergrad the objective function value:
@@ -730,6 +731,82 @@ def switch_to_tpe(seed : int):
   print('List of added trials :')
   print_optuna_trials()
 
+# Make a parameter-variable for Nevegrad's search space:
+def nevegrad_integer_var(param : Param, space_type : str, log_threshold : int):
+  assert(len(param.values) >= 2)
+  assert(space_type != '')
+  assert(log_threshold >= -1)
+  assert(len(param.values) >= 2)
+  assert(space_type != 'categ')
+  low = param.values[0]
+  high = param.values[-1]
+  default = param.default
+  int_param = None
+  logVal = False
+  if 'log' in space_type and high > log_threshold:
+    assert(log_threshold >= 0)
+    logVal = True
+    print('Log mode for Nevergrad variable, ' + str(param))
+    if low == 0: # 0 is prohibited in log mode:
+      low = 1
+      print('New low value is ' + str(low))
+  assert(low != high and low <= param.default <= high)
+  if logVal == False:
+    int_param = nevergrad.p.Scalar(
+          init=default, lower=low, upper=high
+        ).set_integer_casting()
+  else:
+    assert(low != 0)
+    int_param =  nevergrad.p.Log(
+      init=default, lower=low, upper=high
+    ).set_integer_casting()
+  assert(int_param != None)
+  return int_param
+
+# Form Optuna variable with proper distribution:
+def optuna_var(param : Param, space_type : str, log_threshold : int):
+  assert(len(param.values) >= 2)
+  assert(space_type != '')
+  assert(log_threshold >= -1)
+  low = param.values[0]
+  high = param.values[-1]
+  opt_var = None
+  if space_type == 'categ':
+    assert(log_threshold == -1)
+    opt_var = optuna.distributions.CategoricalDistribution(param.values)
+  elif space_type == 'interval':
+    assert(log_threshold == -1)
+    opt_var = optuna.distributions.IntDistribution(low, high)
+  elif 'log' in space_type:
+    assert(log_threshold >= 0)
+    logVal = False
+    if high > log_threshold:
+      logVal = True
+      print('Log mode for Optuna variable, ' + str(param))
+      if low == 0: # 0 is prohibited in log mode:
+        low = 1
+        print('New low value is ' + str(low))
+    opt_var = optuna.distributions.IntDistribution(low, high, log=logVal)
+  assert(low <= param.default <= high)
+  assert(opt_var != None)
+  return opt_var
+
+  # Max parameters values are:
+  # [2 3] [25 100 200] [1000 8192 10000] [32768 1000000 100000000 1073741824] [2147483647]
+  # So threshold for Log=True are : > 3, > 200, > 10000, > 1073741824
+def log_threshold_from_space_type(space_type : str):
+  assert('log' in space_type)
+  log_threshold = -1
+  if '1' in space_type:
+    log_threshold = 3
+  elif '2' in space_type:
+    log_threshold = 200
+  elif '3' in space_type:
+    log_threshold = 10000
+  elif '4' in space_type:
+    log_threshold = 1073741824
+  assert(log_threshold >= 0)
+  return log_threshold
 
 # Main function:
 if __name__ == '__main__':
@@ -770,6 +847,7 @@ if __name__ == '__main__':
   # Algorithm index is not used here to have same seeds for all algorithms for comparison.
   all_params_string = ''
   for p in params:
+    #print(p)
     values_string = [str(x) for x in p.values]
     all_params_string += p.name + ':' + "".join(values_string)
   #print('all_params_string : ' + all_params_string)
@@ -793,7 +871,7 @@ if __name__ == '__main__':
   random_str += '_' + op.opt_alg
   print("The randomly generated string for algorithm " + op.opt_alg + " is : " + str(random_str))
   assert(len(solver_name) > 0)
-  new_solver_name = create_solver_copy(solver_name, random_str)
+  new_solver_name = create_solver_copy(solver_name, op.space_type, random_str)
   print('Solver name is changed to ' + new_solver_name)
   op.solver_name = new_solver_name
 
@@ -834,29 +912,42 @@ if __name__ == '__main__':
   init_points_num = len(params) + 1
   print('init_points_num for ask-and-tell algorithm : ' + str(init_points_num))
 
-  # Initialize sktopt optimizer if needed:
-  if op.opt_alg == 'Optuna-TPE':
-    sampler = optuna.samplers.TPESampler(n_startup_trials=init_points_num, seed=op.seed)
-    optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
-  elif op.opt_alg == 'Optuna-HillClimbing' or op.opt_alg == 'Optuna-HillClimbing-TPE':
-    mod = optunahub.load_module("samplers/hill_climbing")
-    # Set the limit of restarts to the limit of points to stay in HillClimbing mode,
-    # otherwise HillClimbing can switch to Random search.
-    # neighbor_size can be also changed here:
-    search_space = {}
+  log_threshold = -1
+  if 'log' in op.space_type:
+    log_threshold = log_threshold_from_space_type(op.space_type)
+  print('log_threshold : ' + str(log_threshold))
+
+  optuna_search_space = {}
+  # Initialize optimizer if needed:
+  if 'Optuna' in op.opt_alg:
+    # Form the search space - all variables with proper distributions:
     for param in params:
-      search_space[param.name] = CategoricalDistribution(param.values)
-    print('op.seed : ' + str(op.seed))
-    sampler = mod.HillClimbingSampler(search_space=search_space, max_restarts=op.max_points, seed=op.seed) 
-    optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
+      optuna_search_space[param.name] = optuna_var(param, op.space_type, log_threshold)
+    if op.opt_alg == 'Optuna-TPE':
+      sampler = optuna.samplers.TPESampler(n_startup_trials=init_points_num, seed=op.seed)
+      optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
+    elif op.opt_alg == 'Optuna-HillClimbing' or op.opt_alg == 'Optuna-HillClimbing-TPE':
+      mod = optunahub.load_module("samplers/hill_climbing")
+      # Set the limit of restarts to the limit of points to stay in HillClimbing mode,
+      # otherwise HillClimbing can switch to Random search.
+      # neighbor_size can be also changed here:
+      sampler = mod.HillClimbingSampler(search_space=optuna_search_space, max_restarts=op.max_points, seed=op.seed) 
+      optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
   elif 'Nevergrad' in op.opt_alg:
-    # Set the global seed for Nevergrad:
-    parametrization = nevergrad.p.Instrumentation(
-      **{
-          p.name : nevergrad.p.TransitionChoice(p.values)
-          for p in params
-      }
-    )
+    parametrization = None
+    # Categorical space:
+    if op.space_type == 'categ':
+      parametrization = nevergrad.p.Instrumentation(
+        **{ p.name : nevergrad.p.TransitionChoice(p.values) for p in params}
+      )
+    # Sapce with intervals of integers:
+    else:
+      assert(op.space_type == 'interval' or 'log' in op.space_type)
+      kwargs = {}
+      for param in params:
+        kwargs[param.name] = nevegrad_integer_var(param, op.space_type, log_threshold)
+      parametrization = nevergrad.p.Instrumentation(**kwargs)
+    assert(parametrization != None)
     #print(parametrization)
     # If the maximum number of points is given, use it as bugdet, otherwise None:
     # If budget is not None, than at most budget points will be processed,
@@ -901,10 +992,9 @@ if __name__ == '__main__':
   if 'Optuna' in op.opt_alg:
     assert(len(trial_params) == len(def_point))
     optuna_study.enqueue_trial(trial_params)
-    optuna_trial = optuna_study.ask()
+    optuna_trial = optuna_study.ask(optuna_search_space)
     # These suggest_categorical() are required by Optuna for every asked point:
-    for param in params:
-      val = optuna_trial.suggest_categorical(param.name, param.values)
+    pnt = point_from_optuna_trial(optuna_trial, params)
   elif 'Nevergrad' in op.opt_alg:
     # Give the default point and ask() for it:
     nevergrad_optimizer.suggest(**trial_params)
@@ -951,7 +1041,7 @@ if __name__ == '__main__':
     elapsed_time = round(time.time() - start_time, 2)
     print('Elapsed ' + str(elapsed_time) + ' sec')
     # Ask for a new point:
-    point_to_process = ask_point()
+    point_to_process = ask_point(params, op, log_threshold)
     # Check the point's status:
     tuple_point = tuple(point_to_process)
     #print(tuple_point)
@@ -1002,9 +1092,9 @@ if __name__ == '__main__':
   print(str(worse_than_best_but_calc_points_num) + ' calculated points which were worse than the current best')
   print(str(len(generated_points)) + ' generated points, of them:')
   print(stat(generated_points))
-  print('Final best max time : ' + str(max_instance_time_best_point))
   print('Final best sum time : ' + str(best_sum_time) + ' , so ' + \
     str(round(default_sum_time, 2)) + ' -> ' + str(best_sum_time))
+  print('Final best max time : ' + str(max_instance_time_best_point))
   if updates_num > 0:
     if best_point == def_point:
         print('The best point is the default one')
