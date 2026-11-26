@@ -13,12 +13,14 @@
 #========================================================================================
 
 script_name = "bbo_param_solver.py"
-version = '0.2.2'
+version = '0.2.3'
 
 # Like in ParamILS, give BOUND_MULTIPLIER x t time where t is the current best time:
 BOUND_MULTIPLIER = 2
 # A penalty coefficient for interrupted CNFs and points:
 CNF_PENALTY_INTERR = 10 # PAR10 as in ParamILS and SMAC
+# For this number of a variable values and lower, always use categorical distribution: 
+MAX_VALUES_NUM_CATEGORICAL = 10
 
 import sys
 import glob
@@ -44,7 +46,6 @@ optuna_study = None
 optuna_trial = None
 nevergrad_trial = None
 nevergrad_optimizer = None
-SWITCH_OPTIMIZER = False
 
 optalg_indices = {
     "Optuna-TPE" : 0,
@@ -93,7 +94,6 @@ class Options:
 	max_points : int
 	max_wall_time : float
 	max_solver_time : float
-	defpcs_file : str
 	seed : int
 	is_solving : bool
 	def __init__(self):
@@ -104,7 +104,6 @@ class Options:
 		self.max_points = 1000
 		self.max_wall_time = 86400
 		self.max_solver_time = -1
-		self.defpcs_file = ''
 		self.seed = 0
 		self.is_solving = False
 	def __str__(self):
@@ -219,11 +218,9 @@ def parse_cdcl_result(cdcl_log : str):
 			sat = 1
 		elif 's UNSATISFIABLE' in line:
 			sat = 2
-	if t <= 0:
+	if sat == -1 and t <= 0:
 		print('WARNING. Invalid solver output:')
 		print(cdcl_log)
-    # Treat as interrupted
-		t, sat = 0, -1
 	assert(t >= 0)
 	return t, sat
 
@@ -243,27 +240,6 @@ def create_solver_copy(solver_name : str, space_type : str, random_str : str):
   sys_str = 'cp ' + solver_name + ' ' + new_solver_name
   subprocess.run(sys_str, shell=True)
   return new_solver_name
-
-# Randomly choose an element from a given list except given current value.
-# The closer index is to the given one, the higher probability is to be chosen.
-def next_value(lst : list, cur_val : int):
-  indx = lst.index(cur_val)
-  assert(indx >= 0 and indx < len(lst))
-  weights = [0 for _ in lst]
-  max_dist_to_left = indx
-  max_dist_to_right = len(lst) - indx - 1
-  max_dist = max(max_dist_to_left, max_dist_to_right)
-  for i in range(indx):
-    weights[indx - i - 1] = pow(2, max_dist-1 - i)
-  for i in range(indx+1, len(lst)):
-    weights[i] = pow(2, max_dist-1 - (i - indx - 1))
-  #print('indx : ' + str(indx))
-  #print(weights)
-  r = random.choices(lst, weights, k=1)
-  assert(len(r) == 1)
-  assert(r[0] in lst)
-  assert(r[0] != cur_val)
-  return r[0]
 
 # Whether two given points are equal:
 def equalparamval(paramname : str, point1 : list, point2 : list, inddict : dict):
@@ -357,12 +333,10 @@ def points_diff(p1 : list, p2 : list, params : list):
     res_str = res_str[:-1]  
   return res_str
 
-
 # Calc objective function and process results:
 def calc_obj_collect_result(point : list):
     res = calc_obj(point)
     collect_result(res)
-
 
 # Run solver on a given point:
 def calc_obj(point : list):
@@ -385,7 +359,7 @@ def calc_obj(point : list):
   # Calculate a basic time limit for the solver:
   solver_time_lim = op.max_wall_time
   if op.max_solver_time > 0:
-    assert(op.max_solver_time < op.max_wall_time)
+    assert(op.max_solver_time <= op.max_wall_time)
     solver_time_lim = op.max_solver_time
   # Process each CNF from the sample:
   cnf_num = 0
@@ -400,7 +374,6 @@ def calc_obj(point : list):
     # If no time is left, do not run the solver:
     if avail_wall_time <= 0:
       print('Break: negative available wall time ' + str(avail_wall_time))
-      is_interrupted_point = True
       break
     # Update the solver limit to not exceed the wall limit:
     if best_sum_time > 0 and (avail_wall_time > 0 and avail_wall_time < solver_time_lim):
@@ -438,7 +411,7 @@ def calc_obj(point : list):
         timeout=rounded_solver_time_lim + 5,  # Give the solver 5 extra seconds
         start_new_session=True,               # Kill the whole process group on timeout
       )
-      if completed.returncode not in (0, 10):
+      if completed.returncode not in (0, 10, 20):
         print(f'WARNING: solver exit code {completed.returncode} on {cnf_file_name}')
       cdcl_log = completed.stdout
       #returncode = completed.returncode
@@ -483,17 +456,12 @@ def calc_obj(point : list):
         print('Current obj func value ' + str(round(cur_sum_time, 2)) + ' is already worse than ' + \
           str(BOUND_MULTIPLIER) + 'x ' + str(best_sum_time))
         print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
-        is_interrupted_point = True
+        break
       elapsed_time = round(time.time() - start_time, 2)
       # If time limit for the script is reached:
       if elapsed_time >= op.max_wall_time:
         print('Wall time limit is reached while calculating objective function')
         print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
-        is_interrupted_point = True
-      if is_interrupted_point == True:
-        # Tell Optuna the intermediate result for a point that will be soon PRUNEd:
-        if 'Optuna' in op.opt_alg:
-          optuna_trial.report(cur_sum_time, step=cnf_num)
         break
   # end of loop 'for cnf_file_name in cnfs'
   # It is possible that is_interrupted_point is False here and sat_num < len(cnfs)
@@ -501,9 +469,14 @@ def calc_obj(point : list):
   # any but the last CNF, then is_interrupted_point is already True here:
   if sat_num < len(cnfs):
     is_interrupted_point = True
+    # Tell Optuna the intermediate result for a point that will be soon PRUNEd:
+    if 'Optuna' in op.opt_alg:
+      optuna_trial.report(cur_sum_time, step=cnf_num)
   #print('Obj func value : ' + str(cur_sum_time))
   cur_sum_time = round(cur_sum_time, 2)
   assert(cur_sum_time >= 0)
+  # Replace too tiny value:
+  cur_sum_time = max(cur_sum_time, 0.01)
   return point, cur_sum_time, max_instance_time, sys_str, is_interrupted_point
 
 # Collect a result produced by solver:
@@ -562,13 +535,13 @@ def collect_result(res : tuple):
     print('Finished point with sum_time ' + str(cur_sum_time) + ' , max_inst_time ' + str(max_instance_time))
   else:
     # Calculate a 2 x cur-best-time penalty for interuupted points as in ParamILS and SMAC:
-    assert(best_sum_time > 0)
+    assert(best_sum_time >= 0)
     assert(BOUND_MULTIPLIER >= 1)
     penalty_sum_time = round(best_sum_time * CNF_PENALTY_INTERR, 2)
     assert(penalty_sum_time > 0)
     generated_points[tuple_point] = PointResult(PointStatus.INTERRUPTED, penalty_sum_time)
     tell_time = penalty_sum_time
-  assert(tell_time > 0)
+  assert(tell_time >= 0)
   # Tell Optuna the objective function value:
   if 'Optuna' in op.opt_alg:
     assert(type(optuna_trial) != types.NoneType)
@@ -586,7 +559,7 @@ def collect_result(res : tuple):
       # Stationary, on the same scale as the summed objective.
       tell_time = len(cnfs) * op.max_solver_time * BOUND_MULTIPLIER
     nevergrad_optimizer.tell(nevergrad_trial, tell_time)
-  assert(best_sum_time > 0)
+  assert(best_sum_time >= 0)
 
 # Read all CNFs in a given dir:
 def read_cnfs(cnfs_dir_name : str):
@@ -598,34 +571,18 @@ def read_cnfs(cnfs_dir_name : str):
   cnfs.sort()
   return cnfs
 
-
-# String-representation of a given point:
-def strlistrepr(lst : list):
-  assert(len(lst) > 1)
-  s = ''
-  for x in lst[:-1]:
-    s += str(x) + '-'
-  s += str(lst[-1])
-  return s
-
 # Write generated points to a file:
-def write_points(points : dict, opt_alg : str):
-  out_name = 'generated_points_' + opt_alg
+def write_points(points : dict, opt_alg : str, seed: int):
+  out_name = 'generated_points_' + opt_alg + '_seed=' + str(seed)
   print('Writing generated points to file ' + out_name)
   with open(out_name, 'w') as f:
     for p, pr in points.items():
       f.write(f"{p} {pr.status.name} {pr.value}\n")
 
 # Write final best point as a pcs file:
-def write_final_pcs(best_point : list, params : list, cnfs : list):
+def write_final_pcs(best_point : list, params : list, opt_alg : str, seed : int):
   assert(len(best_point) == len(params))
-  outname = 'final_best.pcs'
-  #for x in cnfs:
-    #assert('.cnf' in x)
-    #outname += os.path.basename(x.split('.cnf')[0])
-    #if x != cnfs[-1]:
-      #outname += '_'
-  #outname += '.pcs'
+  outname = 'final_best_' + opt_alg + '_seed=' + str(seed) + '.pcs'
   with open(outname, 'w') as ofile:
     for i in range(len(best_point)):
       ofile.write(params[i].name + ' {')
@@ -633,7 +590,6 @@ def write_final_pcs(best_point : list, params : list, cnfs : list):
         ofile.write(str(v) + ', ')
       ofile.write(str(params[i].values[-1]) + '}')
       ofile.write('[' + str(best_point[i]) + ']\n')
-
 
 def processed(generated_points : dict):
   res = 0
@@ -643,7 +599,6 @@ def processed(generated_points : dict):
         res += 1
   return res
 
-
 def finished(generated_points : dict):
   res = 0
   for point_tuple in generated_points:
@@ -651,14 +606,12 @@ def finished(generated_points : dict):
       res += 1
   return res
 
-
 def interrupted(generated_points : dict):
   res = 0
   for point_tuple in generated_points:
     if generated_points[point_tuple].status == PointStatus.INTERRUPTED:
       res += 1
   return res
-
 
 def stat(generated_points : dict):
   res = ''
@@ -700,42 +653,22 @@ def print_nevergrad_trials():
     print(f"Function's value: {value_obj.mean}") # 1 evaluation so 'mean' here is the function's value 
     #print(f"  Count: {value_obj.count}") # Number of times this point was evaluated[reference:6]
 
-# Make a parameter-variable for Nevegrad's search space:
-def nevegrad_integer_var(param : Param, space_type : str, log_threshold : int):
-  assert(len(param.values) >= 2)
-  assert(space_type != '')
-  assert(log_threshold >= -1)
-  assert(len(param.values) >= 2)
-  assert(space_type != 'categ')
-  if all(isinstance(v, int) for v in param.values) and \
-    param.values != list(range(param.values[0], param.values[-1] + 1)):
+# Returns True iff param.values is not exactly [low, low+1, ..., high].
+def pcs_values_are_sparse(param : Param) -> bool:
+  if not all(isinstance(v, int) for v in param.values):
+    return False
+  low = param.values[0]
+  high = param.values[-1]
+  if len(param.values) != high - low + 1:
+    return True
+  return any(param.values[i] != low + i for i in range(len(param.values)))
+
+# Print warning if values are sparse:
+def check_if_sparse(param : Param, space_type : str):
+  if pcs_values_are_sparse(param):
     print(f'WARNING [{space_type}]: {param.name} PCS values are sparse; '
           f'{space_type} mode searches the full interval '
           f'[{param.values[0]}, {param.values[-1]}]')
-  low = param.values[0]
-  high = param.values[-1]
-  default = param.default
-  int_param = None
-  logVal = False
-  if 'log' in space_type and high > log_threshold:
-    assert(log_threshold >= 0)
-    logVal = True
-    print('Log mode for Nevergrad variable, ' + str(param))
-    if low == 0: # 0 is prohibited in log mode:
-      low = 1
-      print('New low value is ' + str(low))
-  assert(low != high and low <= param.default <= high)
-  if logVal == False:
-    int_param = nevergrad.p.Scalar(
-          init=default, lower=low, upper=high
-        ).set_integer_casting()
-  else:
-    assert(low != 0)
-    int_param =  nevergrad.p.Log(
-      init=default, lower=low, upper=high
-    ).set_integer_casting()
-  assert(int_param != None)
-  return int_param
 
 # Form Optuna variable with proper distribution:
 def optuna_var(param : Param, space_type : str, log_threshold : int):
@@ -744,30 +677,70 @@ def optuna_var(param : Param, space_type : str, log_threshold : int):
   assert(log_threshold >= -1)
   low = param.values[0]
   high = param.values[-1]
+  # Count the number of integer values for integer distribution: 
+  values_num = high - low + 1
   opt_var = None
-  if space_type == 'categ':
-    assert(log_threshold == -1)
+  # If 10 values and lower, always use categorical distribution:
+  if space_type == 'categ' or values_num <= MAX_VALUES_NUM_CATEGORICAL:
     opt_var = optuna.distributions.CategoricalDistribution(param.values)
-  elif space_type == 'interval':
-    assert(log_threshold == -1)
-    opt_var = optuna.distributions.IntDistribution(low, high)
+  elif space_type == 'interval' or (log_threshold >= 0 and high <= log_threshold):
+    check_if_sparse(param, space_type)
+    opt_var = optuna.distributions.IntDistribution(low, high, log=False)
   elif 'log' in space_type:
     assert(log_threshold >= 0)
-    logVal = False
-    if high > log_threshold:
-      logVal = True
-      print('Log mode for Optuna variable, ' + str(param))
-      if low == 0: # 0 is prohibited in log mode:
-        low = 1
-        print('New low value is ' + str(low))
-    opt_var = optuna.distributions.IntDistribution(low, high, log=logVal)
-  assert(low <= param.default <= high)
+    assert(values_num > MAX_VALUES_NUM_CATEGORICAL)
+    assert(high > log_threshold)
+    print('Log mode for Optuna variable, ' + str(param))
+    if low == 0: # 0 is prohibited in log mode:
+      low = 1
+      if param.default == 0:
+        param.default = 1
+      print('New low value is ' + str(low) + ' ; 0 is not allowed in Log mode')
+    opt_var = optuna.distributions.IntDistribution(low, high, log=True)
+  assert(low <= param.default and param.default <= high)
   assert(opt_var != None)
   return opt_var
 
-  # Max parameters values are:
-  # [2 3] [25 100 200] [1000 8192 10000] [32768 1000000 100000000 1073741824] [2147483647]
-  # So threshold for Log=True are : > 3, > 200, > 10000, > 1073741824
+# Make a parameter-variable for Nevegrad's search space:
+def nevegrad_var(param : Param, space_type : str, log_threshold : int):
+  assert(len(param.values) >= 2)
+  assert(space_type != '')
+  assert(log_threshold >= -1)
+  assert(len(param.values) >= 2)
+  low = param.values[0]
+  high = param.values[-1]
+  values_num = high - low + 1
+  assert(values_num >= 2)
+  int_param = None
+  low = param.values[0]
+  high = param.values[-1]
+  if space_type == 'categ' or values_num <= MAX_VALUES_NUM_CATEGORICAL:
+    int_param = nevergrad.p.TransitionChoice(param.values)
+  elif space_type == 'interval' or (log_threshold >= 0 and high <= log_threshold):
+    check_if_sparse(param, space_type)
+    int_param = nevergrad.p.Scalar(
+              init=param.default, lower=low, upper=high
+            ).set_integer_casting()
+  elif 'log' in space_type:
+    assert(log_threshold >= 0)
+    assert(values_num > MAX_VALUES_NUM_CATEGORICAL)
+    assert(high > log_threshold)
+    print('Log mode for Nevergrad variable, ' + str(param))
+    if low == 0: # 0 is prohibited in log mode:
+      low = 1
+      if param.default == 0:
+        param.default = 1
+      print('New low value is ' + str(low) + ' ; 0 is not allowed in Log mode')
+    int_param =  nevergrad.p.Log(
+      init=param.default, lower=low, upper=high
+    ).set_integer_casting()
+  assert(int_param != None)
+  assert(low <= param.default and param.default <= high)
+  return int_param
+
+# Max parameters values are:
+# [2 3] [25 100 200] [1000 8192 10000] [32768 1000000 100000000 1073741824] [2147483647]
+# So threshold for Log=True are : > 3, > 200, > 10000, > 1073741824
 def log_threshold_from_space_type(space_type : str):
   assert('log' in space_type)
   log_threshold = -1
@@ -787,24 +760,18 @@ if __name__ == '__main__':
   if len(sys.argv) < 4:
     print_usage()
     exit(1)
-
   print('Running script ' + script_name + ' of version ' + version)
-
   start_time = time.time()
-
   # Solver name is taken from argv[1] inside Options read():
   solver_name = sys.argv[1]
   param_file_name = sys.argv[2]
   cnfs_dir_name = sys.argv[3]
-
   print('BOUND_MULTIPLIER : ' + str(BOUND_MULTIPLIER))
   print('solver_name      : ' + solver_name)
   print('param_file_name  : ' + param_file_name)
   print('cnfs_dir_name    : ' + cnfs_dir_name)
-
   op = Options()
   op.read(sys.argv[3:])
-
   # Read CNFs:
   cnfs = []
   cnfs = read_cnfs(cnfs_dir_name)
@@ -813,10 +780,8 @@ if __name__ == '__main__':
   print(str(len(cnfs)) + ' CNFs were read :')
   for cnf in cnfs:
     print(cnf)
-
   # Read parameters and their values:
   params = read_pcs(param_file_name)
-
   # Force the seed depend solver, pcs name, CNFs names, and user's seed, 
   # Algorithm index is not used here to have same seeds for all algorithms for comparison.
   all_params_string = ''
@@ -835,12 +800,10 @@ if __name__ == '__main__':
   # % (2**32) is needed since a seed myst be between 0 and 2**32 - 1
   op.seed = (op.seed + int_hash) % (2**32)
   print('Updated seed : ' + str(op.seed))
-
   # random is used in the script:
   random.seed(op.seed)
   # np.random is used by Nevegrad:
   np.random.seed(op.seed)
-  
   random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k = 10))
   random_str += '_' + op.opt_alg
   print("The randomly generated string for algorithm " + op.opt_alg + " is : " + str(random_str))
@@ -848,10 +811,8 @@ if __name__ == '__main__':
   new_solver_name = create_solver_copy(solver_name, op.space_type, random_str)
   print('Solver name is changed to ' + new_solver_name)
   op.solver_name = new_solver_name
-
   # Print the final options:
   print(op)
-
   # Form a default point:
   def_point = list()
   total_val_num = 0
@@ -871,28 +832,22 @@ if __name__ == '__main__':
     paramsdict[params[i].name] = i
   print('Dictionary of parameters :')
   print(paramsdict)
-
   best_point = copy.deepcopy(def_point)
   # Command for default point:
   best_command = op.solver_name + ' ' + cnfs[0]
-
   default_sum_time = op.def_point_time
   best_sum_time = op.def_point_time
   print('Current best sum time : ' + str(best_sum_time))
-
   elapsed_time = round(time.time() - start_time, 2)
   print('Elapsed : ' + str(elapsed_time) + ' seconds')
-
   #init_points_num = len(params) + 1
   # At least 10 and at most 30 initial points, by default it is 10 % of the max points lim.
   init_points_num = max(10, min(30, op.max_points // 10))
   print('init_points_num for ask-and-tell algorithm : ' + str(init_points_num))
-
   log_threshold = -1
   if 'log' in op.space_type:
     log_threshold = log_threshold_from_space_type(op.space_type)
   print('log_threshold : ' + str(log_threshold))
-
   optuna_search_space = {}
   # Initialize optimizer if needed:
   if 'Optuna' in op.opt_alg:
@@ -910,19 +865,10 @@ if __name__ == '__main__':
       sampler = mod.HillClimbingSampler(search_space=optuna_search_space, max_restarts=op.max_points, seed=op.seed) 
       optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
   elif 'Nevergrad' in op.opt_alg:
-    parametrization = None
-    # Categorical space:
-    if op.space_type == 'categ':
-      parametrization = nevergrad.p.Instrumentation(
-        **{ p.name : nevergrad.p.TransitionChoice(p.values) for p in params}
-      )
-    # Sapce with intervals of integers:
-    else:
-      assert(op.space_type == 'interval' or 'log' in op.space_type)
-      kwargs = {}
-      for param in params:
-        kwargs[param.name] = nevegrad_integer_var(param, op.space_type, log_threshold)
-      parametrization = nevergrad.p.Instrumentation(**kwargs)
+    kwargs = dict()
+    for param in params:
+      kwargs[param.name] = nevegrad_var(param, op.space_type, log_threshold)
+    parametrization = nevergrad.p.Instrumentation(**kwargs)
     assert(parametrization != None)
     #print(parametrization)
     # If the maximum number of points is given, use it as bugdet, otherwise None:
@@ -948,7 +894,6 @@ if __name__ == '__main__':
         num_workers=1  # Sequential ask-and-tell
       )
     assert(nevergrad_optimizer != None)
-
   updates_num = 0
   max_instance_time_best_point = -1
   skipped_points_num = 0
@@ -957,7 +902,6 @@ if __name__ == '__main__':
   processed_points_num = 1 # 1 since the default point is processed before the main loop:
   iter = 1 # iter 0 is the default point
   elapsed_time = 0
-
   # A dictionary of generated points, where a tuple representation of the
   # point's parameters values is an ID, while the VALUE is a point's status:
   generated_points = dict()
@@ -975,7 +919,6 @@ if __name__ == '__main__':
     # Give the default point and ask() for it:
     nevergrad_optimizer.suggest(**trial_params)
     nevergrad_trial = nevergrad_optimizer.ask()
-  
   # If time for default point is given, update penalty sum time:
   if default_sum_time > 0:
     generated_points[point_tuple] = PointResult(PointStatus.FINISHED, default_sum_time)
@@ -993,11 +936,9 @@ if __name__ == '__main__':
     calc_obj_collect_result(def_point)
     assert(max_instance_time_best_point > 0)
     assert(max_instance_time_best_point < op.max_wall_time)
-
   # Here the default time must be known or calculated and the best time is the default:
-  assert(default_sum_time > 0 and best_sum_time > 0)
+  assert(default_sum_time >= 0 and best_sum_time >= 0)
   assert(default_sum_time == best_sum_time)
-
   # If maximum solver time is not set, use the default point's result:
   if op.max_solver_time <= 0:
     if max_instance_time_best_point > 0:
@@ -1008,12 +949,9 @@ if __name__ == '__main__':
     else:
       op.max_solver_time = op.max_wall_time
     print('max_solver_time is not set, so it was changed to ' + str(op.max_solver_time))
-
   assert(len(generated_points) == 1)
   assert(op.max_solver_time > 0)
-
   print('*** iter 0 was spent on the default point')
-
   # Repeat until all points are processed:
   while processed_points_num < op.max_points and elapsed_time < op.max_wall_time:
     print('*** iter : ' + str(iter))
@@ -1045,16 +983,12 @@ if __name__ == '__main__':
     if elapsed_time >= op.max_wall_time:
       print('The time limit is reached, break.')
       break
-
   # Write generated points:
-  write_points(generated_points, op.opt_alg)
-
+  write_points(generated_points, op.opt_alg, op.seed)
   # Write final pcs file:
-  write_final_pcs(best_point, params, cnfs)
-
+  write_final_pcs(best_point, params, op.opt_alg, op.seed)
   # Kill all solver species if they still exist:
   kill_solver(op.solver_name)
-
   # Print statistics:
   elapsed_time = round(time.time() - start_time, 2)
   best_sum_time = round(best_sum_time, 2)
@@ -1080,7 +1014,6 @@ if __name__ == '__main__':
       print('Difference from the default point:')
       print(diff_str)
   print('Final best command : \n' + best_command)
-
   # Print Optuna statistics:
   if optuna_study != None:
     running_trials_num = 0
