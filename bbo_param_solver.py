@@ -11,17 +11,14 @@
 # By default the script works in the estimating mode, where new points are generated
 # and processed until a stopping criterion is reached.
 #========================================================================================
-#
-# TODOs:
-# 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.2.1'
+version = '0.2.2'
 
 # Like in ParamILS, give BOUND_MULTIPLIER x t time where t is the current best time:
 BOUND_MULTIPLIER = 2
 # A penalty coefficient for interrupted CNFs and points:
-PENALTY_INTERR = 10 # PAR10 as in ParamILS and SMAC
+CNF_PENALTY_INTERR = 10 # PAR10 as in ParamILS and SMAC
 
 import sys
 import glob
@@ -218,9 +215,10 @@ def parse_cdcl_result(cdcl_log : str):
 			assert(len(words) >= 4)
 			assert(words[-1] == 'seconds')
 			t = float(words[-2])
-		assert('s UNSATISFIABLE' not in line)
 		if 's SATISFIABLE' in line:
 			sat = 1
+		elif 's UNSATISFIABLE' in line:
+			sat = 2
 	if t <= 0:
 		print('WARNING. Invalid solver output:')
 		print(cdcl_log)
@@ -326,7 +324,12 @@ def ask_point(params : list, op : Options, log_threshold : int):
         # Here tell() is needed since each ask() must be paired with tell():
         repeated_pnt = generated_points[point_tuple]
         assert(repeated_pnt.status == PointStatus.FINISHED or repeated_pnt.status == PointStatus.INTERRUPTED)
-        nevergrad_optimizer.tell(nevergrad_trial, repeated_pnt.value)
+        # In case interrupted points are given from outside the program:
+        if repeated_pnt.status == PointStatus.INTERRUPTED:
+          repeated_value = len(cnfs) * op.max_solver_time * BOUND_MULTIPLIER
+        else:
+          repeated_value = repeated_pnt.value
+        nevergrad_optimizer.tell(nevergrad_trial, repeated_value)
         skipped_points_num += 1
         print('Same point again, skip it.')
       else:
@@ -435,6 +438,8 @@ def calc_obj(point : list):
         timeout=rounded_solver_time_lim + 5,  # Give the solver 5 extra seconds
         start_new_session=True,               # Kill the whole process group on timeout
       )
+      if completed.returncode not in (0, 10):
+        print(f'WARNING: solver exit code {completed.returncode} on {cnf_file_name}')
       cdcl_log = completed.stdout
       #returncode = completed.returncode
       t, sat = parse_cdcl_result(cdcl_log)
@@ -445,7 +450,7 @@ def calc_obj(point : list):
       t, sat = rounded_solver_time_lim, -1
     assert(t >= 0)
     # Expect SAT or INTERR, while UNSAT is not a valid answer: 
-    assert(sat == -1 or sat == 1)
+    assert(sat == -1 or sat == 1 or sat == 2)
     # Normal situation is that the solver is not interrupted on the default point:
     if sat == -1 and best_sum_time <= 0:
       print('Error. A solver is interrupted on the default point, t : ' + str(t))
@@ -455,9 +460,9 @@ def calc_obj(point : list):
     if sat == -1 or (solver_time_lim > 0 and t > solver_time_lim):
       # PAR10 penalty for an interrupted CNF:
       assert(op.max_solver_time > 0)
-      t = op.max_solver_time * PENALTY_INTERR
+      t = op.max_solver_time * CNF_PENALTY_INTERR
     else:
-      assert(sat == 1) # SAT should be here
+      assert(sat == 1 or sat == 2) # SAT or UNSAT should be here
       sat_num += 1
       max_instance_time = t if max_instance_time < t else max_instance_time
       #print('Time : ' + str(t) + ' on CNF ' + cnf_file_name)
@@ -479,13 +484,16 @@ def calc_obj(point : list):
           str(BOUND_MULTIPLIER) + 'x ' + str(best_sum_time))
         print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
         is_interrupted_point = True
-        break
       elapsed_time = round(time.time() - start_time, 2)
       # If time limit for the script is reached:
       if elapsed_time >= op.max_wall_time:
         print('Wall time limit is reached while calculating objective function')
         print('Break after processing ' + str(cnf_num) + ' CNFs out of ' + str(len(cnfs)))
         is_interrupted_point = True
+      if is_interrupted_point == True:
+        # Tell Optuna the intermediate result for a point that will be soon PRUNEd:
+        if 'Optuna' in op.opt_alg:
+          optuna_trial.report(cur_sum_time, step=cnf_num)
         break
   # end of loop 'for cnf_file_name in cnfs'
   # It is possible that is_interrupted_point is False here and sat_num < len(cnfs)
@@ -497,7 +505,6 @@ def calc_obj(point : list):
   cur_sum_time = round(cur_sum_time, 2)
   assert(cur_sum_time >= 0)
   return point, cur_sum_time, max_instance_time, sys_str, is_interrupted_point
-
 
 # Collect a result produced by solver:
 def collect_result(res : tuple):
@@ -548,7 +555,7 @@ def collect_result(res : tuple):
   # 2) A point is interrupted, so STARTED -> INTERRUPTED
   tell_time = cur_sum_time
   if is_interrupted_point == False:
-    assert(cur_sum_time > 0)
+    assert(cur_sum_time >= 0)
     generated_points[tuple_point] = PointResult(PointStatus.FINISHED, cur_sum_time)
     if cur_sum_time > best_sum_time and best_sum_time > 0:
       worse_than_best_but_calc_points_num += 1
@@ -557,7 +564,7 @@ def collect_result(res : tuple):
     # Calculate a 2 x cur-best-time penalty for interuupted points as in ParamILS and SMAC:
     assert(best_sum_time > 0)
     assert(BOUND_MULTIPLIER >= 1)
-    penalty_sum_time = round(best_sum_time * PENALTY_INTERR, 2)
+    penalty_sum_time = round(best_sum_time * CNF_PENALTY_INTERR, 2)
     assert(penalty_sum_time > 0)
     generated_points[tuple_point] = PointResult(PointStatus.INTERRUPTED, penalty_sum_time)
     tell_time = penalty_sum_time
@@ -601,22 +608,13 @@ def strlistrepr(lst : list):
   s += str(lst[-1])
   return s
 
-
-# Writed generated points to a file:
-def write_points(points : dict, cnfs : list):
-  out_name = 'generated_points'
-  #cleared_cnfs = []
-  #for x in cnfs:
-    #assert('.cnf' in x)
-    #out_name += os.path.basename(x.split('.cnf')[0])
-    #if x != cnfs[-1]:
-    #  out_name += '_'
+# Write generated points to a file:
+def write_points(points : dict, opt_alg : str):
+  out_name = 'generated_points_' + opt_alg
   print('Writing generated points to file ' + out_name)
   with open(out_name, 'w') as f:
-    for p in points:
-      f.write(str(p))
-      f.write('\n')
-
+    for p, pr in points.items():
+      f.write(f"{p} {pr.status.name} {pr.value}\n")
 
 # Write final best point as a pcs file:
 def write_final_pcs(best_point : list, params : list, cnfs : list):
@@ -709,6 +707,11 @@ def nevegrad_integer_var(param : Param, space_type : str, log_threshold : int):
   assert(log_threshold >= -1)
   assert(len(param.values) >= 2)
   assert(space_type != 'categ')
+  if all(isinstance(v, int) for v in param.values) and \
+    param.values != list(range(param.values[0], param.values[-1] + 1)):
+    print(f'WARNING [{space_type}]: {param.name} PCS values are sparse; '
+          f'{space_type} mode searches the full interval '
+          f'[{param.values[0]}, {param.values[-1]}]')
   low = param.values[0]
   high = param.values[-1]
   default = param.default
@@ -897,7 +900,7 @@ if __name__ == '__main__':
     for param in params:
       optuna_search_space[param.name] = optuna_var(param, op.space_type, log_threshold)
     if op.opt_alg == 'Optuna-TPE':
-      sampler = optuna.samplers.TPESampler(n_startup_trials=init_points_num, seed=op.seed)
+      sampler = optuna.samplers.TPESampler(n_startup_trials=init_points_num, multivariate=True, seed=op.seed)
       optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
     elif op.opt_alg == 'Optuna-HillClimbing':
       mod = optunahub.load_module("samplers/hill_climbing")
@@ -995,10 +998,13 @@ if __name__ == '__main__':
   assert(default_sum_time > 0 and best_sum_time > 0)
   assert(default_sum_time == best_sum_time)
 
-  # If maximum solver time is not set, assing what is available:
-  if op.max_solver_time < 0:
+  # If maximum solver time is not set, use the default point's result:
+  if op.max_solver_time <= 0:
     if max_instance_time_best_point > 0:
       op.max_solver_time = max_instance_time_best_point * BOUND_MULTIPLIER
+    # If default objective function value is given but max solver time is not:
+    elif default_sum_time > 0:
+      op.max_solver_time = math.ceil(default_sum_time)
     else:
       op.max_solver_time = op.max_wall_time
     print('max_solver_time is not set, so it was changed to ' + str(op.max_solver_time))
@@ -1041,7 +1047,7 @@ if __name__ == '__main__':
       break
 
   # Write generated points:
-  write_points(generated_points, cnfs)
+  write_points(generated_points, op.opt_alg)
 
   # Write final pcs file:
   write_final_pcs(best_point, params, cnfs)
