@@ -16,7 +16,7 @@
 # 0. Extend to unsatisfiable CNFs.
 
 script_name = "bbo_param_solver.py"
-version = '0.2.0'
+version = '0.2.1'
 
 # Like in ParamILS, give BOUND_MULTIPLIER x t time where t is the current best time:
 BOUND_MULTIPLIER = 2
@@ -52,10 +52,9 @@ SWITCH_OPTIMIZER = False
 optalg_indices = {
     "Optuna-TPE" : 0,
     "Optuna-HillClimbing" : 1,
-    "Optuna-HillClimbing-TPE" : 2,
-    "Nevergrad-PortfolioDiscreteOnePlusOne" : 3,
-    "Nevergrad-DiscreteOnePlusOne" : 4,
-    "Nevergrad-NGOpt" : 5
+    "Nevergrad-PortfolioDiscreteOnePlusOne" : 2,
+    "Nevergrad-DiscreteOnePlusOne" : 3,
+    "Nevergrad-NGOpt" : 4
 }
 
 # Point status:
@@ -130,7 +129,7 @@ class Options:
 				tmp = p.split('-optalg=')[1]
 				tmp = tmp.replace("'", "")
 				self.opt_alg = tmp.replace('"', '')
-				assert(self.opt_alg in ["Optuna-TPE", "Optuna-HillClimbing", "Optuna-HillClimbing-TPE",\
+				assert(self.opt_alg in ["Optuna-TPE", "Optuna-HillClimbing",\
                                 "Nevergrad-PortfolioDiscreteOnePlusOne", "Nevergrad-DiscreteOnePlusOne",\
                                 "Nevergrad-NGOpt"])
 			if '-spacetype=' in p:
@@ -155,7 +154,7 @@ class Options:
 def print_usage():
   print('Usage : ' + script_name + ' solver solver-parameters cnfs-dir [Options]')
   print('  Options :\n' +\
-  '  -optalg=[Optuna-TPE, Optina-HillClimbing, Optuna-HillClimbing-TPE,' + '\n' +\
+  '  -optalg=[Optuna-TPE, Optina-HillClimbing,' + '\n' +\
   '           Nevergrad-PortfolioDiscreteOnePlusOne, Nevergrad-DiscreteOnePlusOne, Nevergrad-NGOpt]' + '\n' +\
   '     (default : "Optuna-TPE") type of optimization algorithm' + '\n' +\
   '  -spacetype=<string>    - (default : categ) categ|interval|log1|log2|log3|log4' + '\n' +\
@@ -225,6 +224,8 @@ def parse_cdcl_result(cdcl_log : str):
 	if t <= 0:
 		print('WARNING. Invalid solver output:')
 		print(cdcl_log)
+    # Treat as interrupted
+		t, sat = 0, -1
 	assert(t >= 0)
 	return t, sat
 
@@ -286,7 +287,7 @@ def ask_point(params : list, op : Options, log_threshold : int):
   global nevergrad_trial
   assert(len(best_point) == len(params))
   new_point = None
-  if 'Optuna' in op.opt_alg: # Optuna-TPE, Optuna-HillCLimbing, Optuna-HillClimbing-TPE
+  if 'Optuna' in op.opt_alg: # Optuna-TPE, Optuna-HillCLimbing
     # Check whether Optuna initializatoin was done:
     assert(type(optuna_study) != types.NoneType)
     # Take a new point from Optuna.
@@ -404,7 +405,9 @@ def calc_obj(point : list):
       solver_time_lim = avail_wall_time
     # Calculate the remaining time for the current point:
     if best_sum_time > 0:
-      remaining_point_time = round(best_sum_time * BOUND_MULTIPLIER - cur_sum_time, 2)
+      remaining_point_time = best_sum_time * BOUND_MULTIPLIER - cur_sum_time
+      # Process a very small elapsed value - ceil() must give at least one second:
+      remaining_point_time = max(remaining_point_time, 0.5)
       assert(remaining_point_time > 0)
       if solver_time_lim > remaining_point_time:
         solver_time_lim = remaining_point_time
@@ -422,19 +425,34 @@ def calc_obj(point : list):
     #print(sys_str)
     cdcl_log = ''
     t, sat = -1, 0
-    cdcl_log = subprocess.run(sys_str, shell=True, capture_output=True, text=True).stdout
-    t, sat = parse_cdcl_result(cdcl_log)
+    #cdcl_log = subprocess.run(sys_str, shell=True, capture_output=True, text=True).stdout
+    try:
+      completed = subprocess.run(
+        sys_str,
+        shell=True,
+        capture_output=True,
+        text=True,
+        timeout=rounded_solver_time_lim + 5,  # Give the solver 5 extra seconds
+        start_new_session=True,               # Kill the whole process group on timeout
+      )
+      cdcl_log = completed.stdout
+      #returncode = completed.returncode
+      t, sat = parse_cdcl_result(cdcl_log)
+    except subprocess.TimeoutExpired:
+      #cdcl_log = ""
+      #returncode = None
+      # The process group was already signalled. Treat as an interrupted run.
+      t, sat = rounded_solver_time_lim, -1
     assert(t >= 0)
     # Expect SAT or INTERR, while UNSAT is not a valid answer: 
     assert(sat == -1 or sat == 1)
     # Normal situation is that the solver is not interrupted on the default point:
     if sat == -1 and best_sum_time <= 0:
-      print('WARNING. A solver is interrupted on the default point, t : ' + str(t))
+      print('Error. A solver is interrupted on the default point, t : ' + str(t))
       assert(default_sum_time <= 0)
-      is_interrupted_point = True
-      break
+      sys.exit()
     # If the solver is interrupted at least once,
-    if sat == -1 or (solver_time_lim > 0 and t >= solver_time_lim):
+    if sat == -1 or (solver_time_lim > 0 and t > solver_time_lim):
       # PAR10 penalty for an interrupted CNF:
       assert(op.max_solver_time > 0)
       t = op.max_solver_time * PENALTY_INTERR
@@ -477,6 +495,7 @@ def calc_obj(point : list):
     is_interrupted_point = True
   #print('Obj func value : ' + str(cur_sum_time))
   cur_sum_time = round(cur_sum_time, 2)
+  assert(cur_sum_time >= 0)
   return point, cur_sum_time, max_instance_time, sys_str, is_interrupted_point
 
 
@@ -504,7 +523,7 @@ def collect_result(res : tuple):
   tuple_point = tuple(point)
   assert(generated_points[tuple_point].status == PointStatus.STARTED)
   # If a new record point is found:
-  if (is_interrupted_point == False and cur_sum_time > 0) and (cur_sum_time < best_sum_time or best_sum_time <= 0):
+  if (is_interrupted_point == False and cur_sum_time >= 0) and (cur_sum_time < best_sum_time or best_sum_time <= 0):
     updates_num += 1
     best_sum_time = cur_sum_time
     best_point = copy.deepcopy(point)
@@ -543,7 +562,6 @@ def collect_result(res : tuple):
     generated_points[tuple_point] = PointResult(PointStatus.INTERRUPTED, penalty_sum_time)
     tell_time = penalty_sum_time
   assert(tell_time > 0)
-
   # Tell Optuna the objective function value:
   if 'Optuna' in op.opt_alg:
     assert(type(optuna_trial) != types.NoneType)
@@ -557,9 +575,11 @@ def collect_result(res : tuple):
     assert(type(nevergrad_trial) != types.NoneType)
     # Nevegrad can not mark a point as PRUNED like Optuna, so
     # give an actual function value (penalized if interrupted);
+    if is_interrupted_point:
+      # Stationary, on the same scale as the summed objective.
+      tell_time = len(cnfs) * op.max_solver_time * BOUND_MULTIPLIER
     nevergrad_optimizer.tell(nevergrad_trial, tell_time)
   assert(best_sum_time > 0)
-
 
 # Read all CNFs in a given dir:
 def read_cnfs(cnfs_dir_name : str):
@@ -681,55 +701,6 @@ def print_nevergrad_trials():
     #print(f"Point: {point_array}")
     print(f"Function's value: {value_obj.mean}") # 1 evaluation so 'mean' here is the function's value 
     #print(f"  Count: {value_obj.count}") # Number of times this point was evaluated[reference:6]
-
-def switch_to_tpe(seed : int):
-  global optuna_study
-  global SWITCH_OPTIMIZER
-  assert(SWITCH_OPTIMIZER == False)
-  SWITCH_OPTIMIZER = True
-  reconstructed_trials = []
-  # This function must be called at most once:
-  for t in optuna_study.trials:
-    # Skip failed/running trials — TPE ignores such trials anyway:
-    if t.state not in [optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.PRUNED]:
-      continue
-    kwargs = {
-      "params": t.params,
-      "distributions": t.distributions,
-      "state": t.state,
-    }
-    if t.state == optuna.trial.TrialState.COMPLETE:
-      # Completed trials require value or values
-      if t.value is not None:
-        kwargs["value"] = t.value
-      elif t.values is not None:
-        kwargs["values"] = t.values
-      else:
-        # Completed trial with no value — skip it:
-        continue
-    else:  # PRUNED
-      assert(t.state == optuna.trial.TrialState.PRUNED)
-      # Pass the intermediate values that led to pruning
-      kwargs["intermediate_values"] = t.intermediate_values
-      # Some pruned trials may still carry a value (e.g., from
-      # a pruner that records the last value); include if present
-      if t.value is not None:
-        kwargs["value"] = t.value
-    reconstructed_trials.append(optuna.trial.create_trial(**kwargs))
-  # end of for loop
-  reconstructed_trials_num = len(reconstructed_trials)
-  print(str(reconstructed_trials_num) + ' trials are ready to be added to TPE from HillClimbing.')
-  processed_points_num = processed(generated_points)
-  assert(processed_points_num <= reconstructed_trials_num)
-  if processed_points_num < reconstructed_trials_num:
-    print(str(reconstructed_trials_num - processed_points_num) + ' of these trials are repeated (skipped) points')
-  # 0 startup trials since they are random - we will use HillClimbing's points instead:
-  sampler = optuna.samplers.TPESampler(n_startup_trials=0, seed=op.seed)
-  optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
-  optuna_study.add_trials(reconstructed_trials)
-  print('Switched from HillClimbing to TPE, and added trials, seed=' + str(seed))
-  print('List of added trials :')
-  print_optuna_trials()
 
 # Make a parameter-variable for Nevegrad's search space:
 def nevegrad_integer_var(param : Param, space_type : str, log_threshold : int):
@@ -909,7 +880,9 @@ if __name__ == '__main__':
   elapsed_time = round(time.time() - start_time, 2)
   print('Elapsed : ' + str(elapsed_time) + ' seconds')
 
-  init_points_num = len(params) + 1
+  #init_points_num = len(params) + 1
+  # At least 10 and at most 30 initial points, by default it is 10 % of the max points lim.
+  init_points_num = max(10, min(30, op.max_points // 10))
   print('init_points_num for ask-and-tell algorithm : ' + str(init_points_num))
 
   log_threshold = -1
@@ -926,7 +899,7 @@ if __name__ == '__main__':
     if op.opt_alg == 'Optuna-TPE':
       sampler = optuna.samplers.TPESampler(n_startup_trials=init_points_num, seed=op.seed)
       optuna_study = optuna.create_study(sampler=sampler, direction="minimize")
-    elif op.opt_alg == 'Optuna-HillClimbing' or op.opt_alg == 'Optuna-HillClimbing-TPE':
+    elif op.opt_alg == 'Optuna-HillClimbing':
       mod = optunahub.load_module("samplers/hill_climbing")
       # Set the limit of restarts to the limit of points to stay in HillClimbing mode,
       # otherwise HillClimbing can switch to Random search.
@@ -1008,7 +981,7 @@ if __name__ == '__main__':
     assert(optuna_trial != types.NoneType)
     if 'Optuna' in op.opt_alg:
       optuna_study.tell(optuna_trial, default_sum_time)
-    elif 'Nevegrad' in op.opt_alg:
+    elif 'Nevergrad' in op.opt_alg:
       nevergrad_optimizer.tell(nevergrad_trial, default_sum_time)
   else:
     # otherwise, add the default point to the queue for processing:
@@ -1066,9 +1039,6 @@ if __name__ == '__main__':
     if elapsed_time >= op.max_wall_time:
       print('The time limit is reached, break.')
       break
-    # Change Optuna's optimizer from HillClimbing to TPE:
-    if iter == init_points_num and op.opt_alg == 'Optuna-HillClimbing-TPE':
-      switch_to_tpe(op.seed)
 
   # Write generated points:
   write_points(generated_points, cnfs)

@@ -1,0 +1,12 @@
+timelim=43200
+pointslim=10000
+for alg in Optuna-TPE Optuna-HillClimbing Optuna-HillClimbing-TPE Nevergrad-PortfolioDiscreteOnePlusOne Nevergrad-DiscreteOnePlusOne Nevergrad-NGOpt
+#for alg in Optuna-TPE Nevergrad-PortfolioDiscreteOnePlusOne Nevergrad-DiscreteOnePlusOne Nevergrad-NGOpt
+do
+    echo $alg
+    for space in categ interval log1 log2 log3 log4
+    do
+	python3 ./bbo_param_solver.py ./kissat4.0.1_quiet ./kissat4.0.1_reduced.pcs ./cnfs_easy/ -optalg=${alg} -seed=0 -maxpoints=${pointslim} -maxtime=$timelim -spacetype=${space} &> out_${alg}_${space} &
+	sleep 1
+    done
+done 
